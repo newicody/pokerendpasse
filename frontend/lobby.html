@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poker Lobby</title>
+    <link rel="stylesheet" href="/css/common.css">
+    <link rel="stylesheet" href="/css/lobby.css">
+</head>
+<body>
+    <div class="lobby-container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo">
+                <h1>♠️ Poker Lobby ♥️</h1>
+                <a href="/" class="home-link">← Home</a>
+                <a href="/profile" id="profileLink" class="profile-link" style="display: none;">👤 Profile</a>
+                <button id="adminBtn" class="admin-btn" style="display: none;">👑 Admin</button>
+            </div>
+            <div class="user-info" id="userInfo">
+                <div class="avatar" id="userAvatar"></div>
+                <div class="details">
+                    <span id="username">Guest</span>
+                    <span id="chips">0 chips</span>
+                </div>
+                <div id="userActions">
+                    <button id="loginBtn" class="btn-small">Login</button>
+                    <button id="registerBtn" class="btn-small">Register</button>
+                    <button id="logoutBtn" class="btn-small" style="display: none;">Logout</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Guest warning -->
+        <div id="guestWarning" class="warning-banner hidden">
+            ⚠️ You are in spectator mode. <a href="#" onclick="showLoginModal()">Login</a> or 
+            <a href="#" onclick="showRegisterModal()">Register</a> to play.
+        </div>
+        
+        <!-- Main content with two columns -->
+        <div class="lobby-content">
+            <!-- Left column: Active Games -->
+            <div class="games-column">
+                <div class="section-header" style="margin-top: 30px;">
+                    <h2>🏆 Active Tournaments</h2>
+                    <span class="section-badge">In Progress</span>
+                </div>
+                <div class="tournaments-grid" id="activeTournamentsGrid">
+                    <div class="loading">Loading tournaments...</div>
+                </div>
+                
+                <div class="section-header" style="margin-top: 30px;">
+                    <h2>📅 Upcoming Tournaments</h2>
+                    <span class="section-badge">Register Now</span>
+                </div>
+                <div class="tournaments-grid" id="upcomingTournamentsGrid">
+                    <div class="loading">Loading tournaments...</div>
+                </div>
+<!-- Dans le header du lobby, ajouter l'heure -->
+<div class="server-time">
+    <span class="time-icon">🕐</span>
+    <span id="serverTime">--:--:--</span>
+</div>
+
+<script>
+// Fonction pour afficher l'heure du serveur
+async function updateServerTime() {
+    try {
+        const response = await fetch('/api/server/time');
+        if (response.ok) {
+            const data = await response.json();
+            document.getElementById('serverTime').textContent = data.time;
+        }
+    } catch (error) {
+        console.error('Error fetching server time:', error);
+    }
+}
+// Mettre à jour toutes les secondes
+setInterval(updateServerTime, 1000);
+updateServerTime();
+</script>
+            </div>
+            
+            <!-- Right column: Chat -->
+            <div class="chat-column">
+<!-- Dans la section chat, ajouter les boutons -->
+<div class="chat-header">
+    <h3>💬 Lobby Chat</h3>
+    <div class="chat-settings">
+        <button id="chatSettingsBtn" title="Chat Settings">⚙️</button>
+        <span id="chatUserCount" class="user-count">0 online</span>
+    </div>
+</div>
+<div class="chat-messages" id="chatMessages">
+    <div class="chat-welcome">Bienvenue au Grang tournament !</div>
+</div>
+<div class="chat-input-area">
+    <div class="smiley-picker">
+        <button class="smiley-btn" id="smileyBtn">😊</button>
+        <div class="smiley-dropdown" id="smileyDropdown"></div>
+    </div>
+    <input type="text" id="chatInput" placeholder="Type a message..." disabled>
+    <button id="chatSendBtn" disabled>Send</button>
+    <button id="mediaBtn" title="Send Media">📎</button>
+</div>
+            </div>
+        </div>
+        
+        <!-- Tournament Details Modal -->
+<div id="tournamentModal" class="modal">
+    <div class="modal-content tournament-modal">
+        <span class="close">&times;</span>
+        <div id="tournamentDetails"></div>
+    </div>
+</div>        
+        <!-- Tournament Tables Modal -->
+        <div id="tournamentTablesModal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>Tournament Tables</h2>
+                <div id="tournamentTablesList" class="tables-list"></div>
+            </div>
+        </div>
+        
+        <!-- Login Modal -->
+        <div id="loginModal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>Login</h2>
+                <form id="loginForm">
+                    <div class="form-group">
+                        <label>Username:</label>
+                        <input type="text" id="loginUsername" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Password:</label>
+                        <input type="password" id="loginPassword" required>
+                    </div>
+                    <div class="form-group checkbox">
+                        <input type="checkbox" id="rememberMe">
+                        <label for="rememberMe">Remember me</label>
+                    </div>
+                    <button type="submit" class="btn-primary">Login</button>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Register Modal -->
+        <div id="registerModal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>Register</h2>
+                <form id="registerForm">
+                    <div class="form-group">
+                        <label>Username:</label>
+                        <input type="text" id="regUsername" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Email:</label>
+                        <input type="email" id="regEmail">
+                    </div>
+                    <div class="form-group">
+                        <label>Password:</label>
+                        <input type="password" id="regPassword" required>
+                    </div>
+                    <button type="submit" class="btn-primary">Register</button>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Settings Modal -->
+        <div id="optionsModal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>Client Settings</h2>
+                <div class="form-group">
+                    <label>Sound Effects:</label>
+                    <select id="soundSetting">
+                        <option value="on">On</option>
+                        <option value="off">Off</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Animation Speed:</label>
+                    <select id="animationSpeed">
+                        <option value="fast">Fast</option>
+                        <option value="normal">Normal</option>
+                        <option value="slow">Slow</option>
+                    </select>
+                </div>
+                <button id="saveSettings" class="btn-primary">Save Settings</button>
+            </div>
+        </div>
+        
+        <!-- Toast notification -->
+        <div id="toast" class="toast"></div>
+    </div>
+    
+    <script src="/js/lobby.js"></script>
+</body>
+</html>

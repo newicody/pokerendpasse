@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multiplayer Poker Game</title>
+    <link rel="stylesheet" href="/css/common.css">
+    <style>
+        .landing {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .landing h1 {
+            font-size: 48px;
+            color: #ffd700;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+            margin-bottom: 20px;
+        }
+        
+        .landing p {
+            font-size: 18px;
+            margin-bottom: 40px;
+            opacity: 0.9;
+        }
+        
+        .buttons {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .btn-large {
+            padding: 15px 40px;
+            font-size: 18px;
+            border-radius: 12px;
+            text-decoration: none;
+            display: inline-block;
+            transition: transform 0.2s;
+        }
+        
+        .btn-large:hover {
+            transform: translateY(-3px);
+        }
+        
+        .features {
+            margin-top: 60px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 30px;
+            max-width: 1000px;
+        }
+        
+        .feature {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 20px;
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .feature h3 {
+            color: #ffd700;
+            margin-bottom: 10px;
+        }
+        
+        .feature p {
+            font-size: 14px;
+            margin-bottom: 0;
+        }
+        
+        @media (max-width: 768px) {
+            .landing h1 { font-size: 32px; }
+            .btn-large { padding: 12px 25px; font-size: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="landing">
+        <h1>♠️ Multiplayer Poker Game ♥️</h1>
+        <p>Texas Hold'em No Limit - Play with friends online</p>
+        
+        <div class="buttons">
+            <a href="/lobby" class="btn-primary btn-large">Enter Lobby</a>
+        </div>
+        
+        <div class="features">
+            <div class="feature">
+                <h3>🎮 Multiplayer</h3>
+                <p>Play with up to 9 players per table</p>
+            </div>
+            <div class="feature">
+                <h3>🃏 Texas Hold'em</h3>
+                <p>No Limit Texas Hold'em with real rules</p>
+            </div>
+            <div class="feature">
+                <h3>💬 Real-time</h3>
+                <p>Live updates with WebSocket technology</p>
+            </div>
+            <div class="feature">
+                <h3>🎯 Multiple Tables</h3>
+                <p>Create or join any table in the lobby</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

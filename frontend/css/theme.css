@@ -1,0 +1,56 @@
+/* frontend/css/themes.css */
+/* Theme: Dark (default) */
+body.theme-dark {
+    --bg-primary: linear-gradient(135deg, #1a472a 0%, #0e2a1a 100%);
+    --bg-secondary: rgba(0, 0, 0, 0.85);
+    --text-primary: #ffffff;
+    --text-secondary: rgba(255, 255, 255, 0.7);
+    --accent: #ffd700;
+    --accent-hover: #ffb347;
+    --card-bg: rgba(0, 0, 0, 0.6);
+    --border-color: rgba(255, 215, 0, 0.3);
+}
+
+/* Theme: Light */
+body.theme-light {
+    --bg-primary: linear-gradient(135deg, #f5f7fa 0%, #e9ecef 100%);
+    --bg-secondary: rgba(255, 255, 255, 0.9);
+    --text-primary: #1a472a;
+    --text-secondary: #2c3e50;
+    --accent: #2c5a2c;
+    --accent-hover: #1e3a1e;
+    --card-bg: rgba(255, 255, 255, 0.9);
+    --border-color: #2c5a2c;
+}
+
+/* Theme: Neon */
+body.theme-neon {
+    --bg-primary: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+    --bg-secondary: rgba(0, 0, 0, 0.85);
+    --text-primary: #00ff00;
+    --text-secondary: #00cc00;
+    --accent: #00ff00;
+    --accent-hover: #00cc00;
+    --card-bg: rgba(0, 0, 0, 0.8);
+    --border-color: #00ff00;
+}
+
+/* Theme: Blue */
+body.theme-blue {
+    --bg-primary: linear-gradient(135deg, #0f2027 0%, #203a43 100%);
+    --bg-secondary: rgba(0, 0, 0, 0.7);
+    --text-primary: #3498db;
+    --text-secondary: #5dade2;
+    --accent: #3498db;
+    --accent-hover: #2980b9;
+    --card-bg: rgba(0, 0, 0, 0.6);
+    --border-color: #3498db;
+}
+
+/* Appliquer les variables */
+body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+/* ... utiliser les variables dans tous les composants */

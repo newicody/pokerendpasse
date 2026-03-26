@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<settings>
+    <server_name>Grand Tournament</server_name>
+    <max_players_per_table>6</max_players_per_table>
+    <default_small_blind>5</default_small_blind>
+    <default_big_blind>10</default_big_blind>
+</settings>

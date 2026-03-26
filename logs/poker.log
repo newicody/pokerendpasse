@@ -1,0 +1,563 @@
+2026-03-25 00:51:51 | INFO     | poker | ==================================================
+2026-03-25 00:51:51 | INFO     | poker | Poker Game Server Started
+2026-03-25 00:51:51 | INFO     | poker | ==================================================
+2026-03-25 00:52:03 | INFO     | poker | [GAME] table=table_1 event=table_created data={"name": "test", "max_players": 9}
+2026-03-25 00:52:24 | INFO     | poker | ==================================================
+2026-03-25 00:52:24 | INFO     | poker | Poker Game Server Started
+2026-03-25 00:52:24 | INFO     | poker | ==================================================
+2026-03-25 00:52:52 | INFO     | poker | ==================================================
+2026-03-25 00:52:52 | INFO     | poker | Poker Game Server Started
+2026-03-25 00:52:52 | INFO     | poker | ==================================================
+2026-03-25 01:01:20 | INFO     | poker | ==================================================
+2026-03-25 01:01:20 | INFO     | poker | Poker Game Server Started
+2026-03-25 01:01:20 | INFO     | poker | ==================================================
+2026-03-25 01:01:20 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 01:01:45 | INFO     | poker | [GAME] table=table_2 event=table_created data={"name": "test2", "max_players": 9}
+2026-03-25 01:02:10 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 01:02:33 | INFO     | poker | ==================================================
+2026-03-25 01:02:33 | INFO     | poker | Poker Game Server Started
+2026-03-25 01:02:33 | INFO     | poker | ==================================================
+2026-03-25 01:02:33 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 01:02:54 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 01:06:35 | INFO     | poker | ==================================================
+2026-03-25 01:06:35 | INFO     | poker | Poker Game Server Started
+2026-03-25 01:06:35 | INFO     | poker | ==================================================
+2026-03-25 01:06:35 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 01:07:12 | INFO     | poker | [GAME] table=table_1 event=table_created data={"name": "test", "max_players": 9}
+2026-03-25 01:07:15 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 01:16:11 | INFO     | poker | ==================================================
+2026-03-25 01:16:11 | INFO     | poker | Poker Game Server Started
+2026-03-25 01:16:11 | INFO     | poker | ==================================================
+2026-03-25 01:16:11 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 01:16:22 | INFO     | poker | [GAME] table=table_1 event=player_joined data={"user_id": "901b9e5f-1554-4c99-bbe9-c32ceb53ffc3", "username": "Player541", "buy_in": 100}
+2026-03-25 01:16:35 | INFO     | poker | [GAME] table=table_1 event=table_created data={"name": "test2", "max_players": 9}
+2026-03-25 01:16:38 | INFO     | poker | [GAME] table=table_1 event=player_joined data={"user_id": "901b9e5f-1554-4c99-bbe9-c32ceb53ffc3", "username": "Player541", "buy_in": 100}
+2026-03-25 01:16:43 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 01:17:26 | INFO     | poker | ==================================================
+2026-03-25 01:17:26 | INFO     | poker | Poker Game Server Started
+2026-03-25 01:17:26 | INFO     | poker | ==================================================
+2026-03-25 01:17:26 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 01:17:30 | INFO     | poker | [GAME] table=table_1 event=player_joined data={"user_id": "901b9e5f-1554-4c99-bbe9-c32ceb53ffc3", "username": "Player541", "buy_in": 100}
+2026-03-25 01:17:41 | INFO     | poker | [CONNECTION] connected: user=901b9e5f-1554-4c99-bbe9-c32ceb53ffc3 table=table_1
+2026-03-25 01:18:05 | INFO     | poker | [GAME] table=table_1 event=player_joined data={"user_id": "1c4e7081-d97d-4803-9baa-c21d08094774", "username": "sccdvs", "buy_in": 100}
+2026-03-25 01:18:05 | INFO     | poker | [CONNECTION] connected: user=1c4e7081-d97d-4803-9baa-c21d08094774 table=table_1
+2026-03-25 01:18:13 | INFO     | poker | [CONNECTION] disconnected: user=901b9e5f-1554-4c99-bbe9-c32ceb53ffc3 table=table_1
+2026-03-25 01:18:14 | INFO     | poker | [CONNECTION] connected: user=1c4e7081-d97d-4803-9baa-c21d08094774 table=table_1
+2026-03-25 02:30:54 | INFO     | poker | [CONNECTION] disconnected: user=1c4e7081-d97d-4803-9baa-c21d08094774 table=table_1
+2026-03-25 02:30:56 | INFO     | poker | [CONNECTION] disconnected: user=1c4e7081-d97d-4803-9baa-c21d08094774 table=table_1
+2026-03-25 02:31:10 | INFO     | poker | [GAME] table=table_1 event=player_joined data={"user_id": "1c4e7081-d97d-4803-9baa-c21d08094774", "username": "sccdvs", "buy_in": 100}
+2026-03-25 02:31:11 | INFO     | poker | [CONNECTION] connected: user=1c4e7081-d97d-4803-9baa-c21d08094774 table=table_1
+2026-03-25 02:32:02 | INFO     | poker | [GAME] table=table_1 event=player_joined data={"user_id": "1c4e7081-d97d-4803-9baa-c21d08094774", "username": "sccdvs", "buy_in": 100}
+2026-03-25 02:32:03 | INFO     | poker | [CONNECTION] connected: user=1c4e7081-d97d-4803-9baa-c21d08094774 table=table_1
+2026-03-25 02:32:17 | INFO     | poker | [CONNECTION] disconnected: user=1c4e7081-d97d-4803-9baa-c21d08094774 table=table_1
+2026-03-25 02:32:17 | INFO     | poker | [CONNECTION] disconnected: user=1c4e7081-d97d-4803-9baa-c21d08094774 table=table_1
+2026-03-25 02:32:17 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 02:45:40 | INFO     | poker | ==================================================
+2026-03-25 02:45:40 | INFO     | poker | Poker Game Server Started
+2026-03-25 02:45:40 | INFO     | poker | ==================================================
+2026-03-25 02:49:04 | INFO     | poker | ==================================================
+2026-03-25 02:49:04 | INFO     | poker | Poker Game Server Started
+2026-03-25 02:49:04 | INFO     | poker | ==================================================
+2026-03-25 02:54:25 | INFO     | poker | ==================================================
+2026-03-25 02:54:25 | INFO     | poker | Poker Game Server Started
+2026-03-25 02:54:25 | INFO     | poker | ==================================================
+2026-03-25 03:03:06 | INFO     | poker | ==================================================
+2026-03-25 03:03:06 | INFO     | poker | Poker Game Server Started
+2026-03-25 03:03:06 | INFO     | poker | ==================================================
+2026-03-25 03:03:06 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 03:03:44 | INFO     | poker | [GAME] table=table_1 event=table_created data={"name": "ttest", "max_players": 9}
+2026-03-25 03:03:46 | INFO     | poker | [GAME] table=table_1 event=player_joined data={"user_id": "2c48653d-399d-47db-8f74-737446355621", "username": "eric", "buy_in": 100}
+2026-03-25 03:03:46 | INFO     | poker | [CONNECTION] connected: user=2c48653d-399d-47db-8f74-737446355621 table=table_1
+2026-03-25 03:03:52 | INFO     | poker | [CONNECTION] disconnected: user=2c48653d-399d-47db-8f74-737446355621 table=table_1
+2026-03-25 03:05:13 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 03:12:24 | INFO     | poker | ==================================================
+2026-03-25 03:12:24 | INFO     | poker | Poker Game Server Started
+2026-03-25 03:12:24 | INFO     | poker | ==================================================
+2026-03-25 03:12:24 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 03:13:12 | INFO     | poker | [GAME] table=table_1 event=table_created data={"name": "Table 1", "max_players": 9}
+2026-03-25 03:13:12 | INFO     | poker | [GAME] table=table_1 event=player_joined data={"user_id": "2c48653d-399d-47db-8f74-737446355621", "username": "eric", "buy_in": 100}
+2026-03-25 03:13:12 | INFO     | poker | [CONNECTION] connected: user=2c48653d-399d-47db-8f74-737446355621 table=table_1
+2026-03-25 03:13:15 | INFO     | poker | [CONNECTION] disconnected: user=2c48653d-399d-47db-8f74-737446355621 table=table_1
+2026-03-25 03:13:29 | INFO     | poker | [GAME] table=table_1 event=table_created data={"name": "test", "max_players": 6}
+2026-03-25 03:13:32 | INFO     | poker | [GAME] table=table_1 event=player_joined data={"user_id": "2c48653d-399d-47db-8f74-737446355621", "username": "eric", "buy_in": 100}
+2026-03-25 03:13:32 | INFO     | poker | [CONNECTION] connected: user=2c48653d-399d-47db-8f74-737446355621 table=table_1
+2026-03-25 03:13:35 | INFO     | poker | [CONNECTION] disconnected: user=2c48653d-399d-47db-8f74-737446355621 table=table_1
+2026-03-25 03:13:51 | INFO     | poker | [GAME] table=table_1 event=table_created data={"name": "csdqc", "max_players": 9}
+2026-03-25 03:13:56 | INFO     | poker | [GAME] table=table_1 event=player_joined data={"user_id": "2c48653d-399d-47db-8f74-737446355621", "username": "eric", "buy_in": 100}
+2026-03-25 03:13:56 | INFO     | poker | [CONNECTION] connected: user=2c48653d-399d-47db-8f74-737446355621 table=table_1
+2026-03-25 03:14:19 | INFO     | poker | [CONNECTION] disconnected: user=2c48653d-399d-47db-8f74-737446355621 table=table_1
+2026-03-25 03:18:29 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 03:31:44 | INFO     | poker | ==================================================
+2026-03-25 03:31:44 | INFO     | poker | Poker Game Server Started
+2026-03-25 03:31:44 | INFO     | poker | ==================================================
+2026-03-25 03:32:52 | INFO     | poker | ==================================================
+2026-03-25 03:32:52 | INFO     | poker | Poker Game Server Started
+2026-03-25 03:32:52 | INFO     | poker | ==================================================
+2026-03-25 03:33:22 | INFO     | poker | ==================================================
+2026-03-25 03:33:22 | INFO     | poker | Poker Game Server Started
+2026-03-25 03:33:22 | INFO     | poker | ==================================================
+2026-03-25 03:33:22 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 03:34:24 | INFO     | poker | ==================================================
+2026-03-25 03:34:24 | INFO     | poker | Poker Game Server Started
+2026-03-25 03:34:24 | INFO     | poker | ==================================================
+2026-03-25 03:34:24 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 03:34:50 | INFO     | poker | ==================================================
+2026-03-25 03:34:50 | INFO     | poker | Poker Game Server Started
+2026-03-25 03:34:50 | INFO     | poker | ==================================================
+2026-03-25 03:34:50 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 03:35:12 | INFO     | poker | ==================================================
+2026-03-25 03:35:12 | INFO     | poker | Poker Game Server Started
+2026-03-25 03:35:12 | INFO     | poker | ==================================================
+2026-03-25 03:35:12 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 03:35:12 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 03:40:28 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 03:47:01 | INFO     | poker | ==================================================
+2026-03-25 03:47:01 | INFO     | poker | Poker Game Server Started
+2026-03-25 03:47:01 | INFO     | poker | ==================================================
+2026-03-25 03:47:01 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 03:47:01 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 03:49:37 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 03:51:39 | INFO     | poker | ==================================================
+2026-03-25 03:51:39 | INFO     | poker | Poker Game Server Started
+2026-03-25 03:51:39 | INFO     | poker | ==================================================
+2026-03-25 03:51:39 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 03:51:39 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 03:53:34 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 03:54:26 | INFO     | poker | ==================================================
+2026-03-25 03:54:26 | INFO     | poker | Poker Game Server Started
+2026-03-25 03:54:26 | INFO     | poker | ==================================================
+2026-03-25 03:54:26 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 03:54:26 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 03:56:49 | INFO     | poker | [GAME] table=table_2 event=table_created data={"name": "Table 2", "max_players": 9}
+2026-03-25 03:56:56 | INFO     | poker | [GAME] table=table_3 event=table_created data={"name": "Table 3", "max_players": 9}
+2026-03-25 04:00:34 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 04:03:34 | INFO     | poker | ==================================================
+2026-03-25 04:03:34 | INFO     | poker | Poker Game Server Started
+2026-03-25 04:03:34 | INFO     | poker | ==================================================
+2026-03-25 04:03:35 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:03:35 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:04:12 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 04:05:38 | INFO     | poker | ==================================================
+2026-03-25 04:05:38 | INFO     | poker | Poker Game Server Started
+2026-03-25 04:05:38 | INFO     | poker | ==================================================
+2026-03-25 04:05:38 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:05:38 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:09:28 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 04:09:33 | INFO     | poker | ==================================================
+2026-03-25 04:09:33 | INFO     | poker | Poker Game Server Started
+2026-03-25 04:09:33 | INFO     | poker | ==================================================
+2026-03-25 04:09:33 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:09:33 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:10:15 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 04:15:04 | INFO     | poker | ==================================================
+2026-03-25 04:15:04 | INFO     | poker | Poker Game Server Started
+2026-03-25 04:15:04 | INFO     | poker | ==================================================
+2026-03-25 04:15:04 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:17:24 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 04:17:57 | INFO     | poker | ==================================================
+2026-03-25 04:17:57 | INFO     | poker | Poker Game Server Started
+2026-03-25 04:17:57 | INFO     | poker | ==================================================
+2026-03-25 04:17:57 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:19:27 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 04:20:45 | INFO     | poker | ==================================================
+2026-03-25 04:20:45 | INFO     | poker | Poker Game Server Started
+2026-03-25 04:20:45 | INFO     | poker | ==================================================
+2026-03-25 04:20:45 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:24:10 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 04:27:47 | INFO     | poker | ==================================================
+2026-03-25 04:27:47 | INFO     | poker | Poker Game Server Started
+2026-03-25 04:27:47 | INFO     | poker | ==================================================
+2026-03-25 04:27:47 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:28:44 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 04:29:12 | INFO     | poker | ==================================================
+2026-03-25 04:29:12 | INFO     | poker | Poker Game Server Started
+2026-03-25 04:29:12 | INFO     | poker | ==================================================
+2026-03-25 04:29:13 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:32:35 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 04:34:47 | INFO     | poker | ==================================================
+2026-03-25 04:34:47 | INFO     | poker | Poker Game Server Started
+2026-03-25 04:34:47 | INFO     | poker | ==================================================
+2026-03-25 04:34:47 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:36:58 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 04:39:35 | INFO     | poker | ==================================================
+2026-03-25 04:39:35 | INFO     | poker | Poker Game Server Started
+2026-03-25 04:39:35 | INFO     | poker | ==================================================
+2026-03-25 04:39:35 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:39:53 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 04:40:26 | INFO     | poker | ==================================================
+2026-03-25 04:40:26 | INFO     | poker | Poker Game Server Started
+2026-03-25 04:40:26 | INFO     | poker | ==================================================
+2026-03-25 04:40:26 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:41:13 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 04:42:51 | INFO     | poker | ==================================================
+2026-03-25 04:42:51 | INFO     | poker | Poker Game Server Started
+2026-03-25 04:42:51 | INFO     | poker | ==================================================
+2026-03-25 04:42:51 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:43:43 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 04:44:07 | INFO     | poker | ==================================================
+2026-03-25 04:44:07 | INFO     | poker | Poker Game Server Started
+2026-03-25 04:44:07 | INFO     | poker | ==================================================
+2026-03-25 04:44:07 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:50:16 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 04:50:17 | INFO     | poker | ==================================================
+2026-03-25 04:50:17 | INFO     | poker | Poker Game Server Started
+2026-03-25 04:50:17 | INFO     | poker | ==================================================
+2026-03-25 04:50:18 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 04:50:20 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 04:56:00 | INFO     | poker | ==================================================
+2026-03-25 04:56:00 | INFO     | poker | Poker Game Server Started
+2026-03-25 04:56:00 | INFO     | poker | ==================================================
+2026-03-25 04:56:00 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 05:02:57 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 05:02:59 | INFO     | poker | ==================================================
+2026-03-25 05:02:59 | INFO     | poker | Poker Game Server Started
+2026-03-25 05:02:59 | INFO     | poker | ==================================================
+2026-03-25 05:18:00 | INFO     | poker | ==================================================
+2026-03-25 05:18:00 | INFO     | poker | Poker Game Server Started
+2026-03-25 05:18:00 | INFO     | poker | ==================================================
+2026-03-25 05:20:37 | INFO     | poker | ==================================================
+2026-03-25 05:20:37 | INFO     | poker | Poker Game Server Started
+2026-03-25 05:20:37 | INFO     | poker | ==================================================
+2026-03-25 05:23:01 | INFO     | poker | ==================================================
+2026-03-25 05:23:01 | INFO     | poker | Poker Game Server Started
+2026-03-25 05:23:01 | INFO     | poker | ==================================================
+2026-03-25 05:23:01 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 05:23:40 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 05:27:50 | INFO     | poker | ==================================================
+2026-03-25 05:27:50 | INFO     | poker | Poker Game Server Started
+2026-03-25 05:27:50 | INFO     | poker | ==================================================
+2026-03-25 05:27:50 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 05:30:24 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 05:35:20 | INFO     | poker | ==================================================
+2026-03-25 05:35:20 | INFO     | poker | Poker Game Server Started
+2026-03-25 05:35:20 | INFO     | poker | ==================================================
+2026-03-25 05:35:20 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 05:35:45 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 05:39:48 | INFO     | poker | ==================================================
+2026-03-25 05:39:48 | INFO     | poker | Poker Game Server Started
+2026-03-25 05:39:48 | INFO     | poker | ==================================================
+2026-03-25 05:39:48 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 05:40:53 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 05:51:57 | INFO     | poker | ==================================================
+2026-03-25 05:51:57 | INFO     | poker | Poker Game Server Started
+2026-03-25 05:51:57 | INFO     | poker | ==================================================
+2026-03-25 05:51:57 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 05:53:46 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 05:55:31 | INFO     | poker | ==================================================
+2026-03-25 05:55:31 | INFO     | poker | Poker Game Server Started
+2026-03-25 05:55:31 | INFO     | poker | ==================================================
+2026-03-25 05:55:31 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 05:55:37 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 05:57:25 | INFO     | poker | ==================================================
+2026-03-25 05:57:25 | INFO     | poker | Poker Game Server Started
+2026-03-25 05:57:25 | INFO     | poker | ==================================================
+2026-03-25 05:57:25 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 05:57:37 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 05:58:23 | INFO     | poker | ==================================================
+2026-03-25 05:58:23 | INFO     | poker | Poker Game Server Started
+2026-03-25 05:58:23 | INFO     | poker | ==================================================
+2026-03-25 05:58:23 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 05:59:53 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 06:04:05 | INFO     | poker | ==================================================
+2026-03-25 06:04:05 | INFO     | poker | Poker Game Server Started
+2026-03-25 06:04:05 | INFO     | poker | ==================================================
+2026-03-25 06:04:05 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 06:04:12 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 06:09:11 | INFO     | poker | ==================================================
+2026-03-25 06:09:11 | INFO     | poker | Poker Game Server Started
+2026-03-25 06:09:11 | INFO     | poker | ==================================================
+2026-03-25 06:09:11 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 09:08:46 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 09:15:03 | INFO     | poker | ==================================================
+2026-03-25 09:15:03 | INFO     | poker | Poker Game Server Started
+2026-03-25 09:15:03 | INFO     | poker | ==================================================
+2026-03-25 09:15:03 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 09:15:39 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 09:15:50 | INFO     | poker | ==================================================
+2026-03-25 09:15:50 | INFO     | poker | Poker Game Server Started
+2026-03-25 09:15:50 | INFO     | poker | ==================================================
+2026-03-25 09:15:50 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 09:20:26 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 09:20:34 | INFO     | poker | ==================================================
+2026-03-25 09:20:34 | INFO     | poker | Poker Game Server Started
+2026-03-25 09:20:34 | INFO     | poker | ==================================================
+2026-03-25 09:20:34 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 09:21:39 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 09:29:56 | INFO     | poker | ==================================================
+2026-03-25 09:29:56 | INFO     | poker | Poker Game Server Started
+2026-03-25 09:29:56 | INFO     | poker | ==================================================
+2026-03-25 09:29:56 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 09:31:01 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 09:31:06 | INFO     | poker | ==================================================
+2026-03-25 09:31:06 | INFO     | poker | Poker Game Server Started
+2026-03-25 09:31:06 | INFO     | poker | ==================================================
+2026-03-25 09:31:06 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 09:35:41 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 09:39:51 | INFO     | poker | ==================================================
+2026-03-25 09:39:51 | INFO     | poker | Poker Game Server Started
+2026-03-25 09:39:51 | INFO     | poker | ==================================================
+2026-03-25 09:39:51 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 09:41:27 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 09:44:16 | INFO     | poker | ==================================================
+2026-03-25 09:44:16 | INFO     | poker | Poker Game Server Started
+2026-03-25 09:44:16 | INFO     | poker | ==================================================
+2026-03-25 09:44:16 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 09:46:05 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 09:49:39 | INFO     | poker | ==================================================
+2026-03-25 09:49:39 | INFO     | poker | Poker Game Server Started
+2026-03-25 09:49:39 | INFO     | poker | ==================================================
+2026-03-25 09:49:39 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 10:02:56 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 10:16:48 | INFO     | poker | ==================================================
+2026-03-25 10:16:48 | INFO     | poker | Poker Game Server Started
+2026-03-25 10:16:48 | INFO     | poker | ==================================================
+2026-03-25 10:17:18 | INFO     | poker | ==================================================
+2026-03-25 10:17:18 | INFO     | poker | Poker Game Server Started
+2026-03-25 10:17:18 | INFO     | poker | ==================================================
+2026-03-25 10:17:18 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 10:18:18 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 10:19:39 | INFO     | poker | ==================================================
+2026-03-25 10:19:39 | INFO     | poker | Poker Game Server Started
+2026-03-25 10:19:39 | INFO     | poker | ==================================================
+2026-03-25 10:19:39 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 10:24:14 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 10:37:44 | INFO     | poker | ==================================================
+2026-03-25 10:37:44 | INFO     | poker | Poker Game Server Started
+2026-03-25 10:37:44 | INFO     | poker | ==================================================
+2026-03-25 10:37:45 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 10:39:44 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 10:54:59 | INFO     | poker | ==================================================
+2026-03-25 10:54:59 | INFO     | poker | Poker Game Server Started
+2026-03-25 10:54:59 | INFO     | poker | ==================================================
+2026-03-25 11:01:50 | INFO     | poker | ==================================================
+2026-03-25 11:01:50 | INFO     | poker | Poker Game Server Started
+2026-03-25 11:01:50 | INFO     | poker | ==================================================
+2026-03-25 11:01:51 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 11:04:05 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 11:12:31 | INFO     | poker | ==================================================
+2026-03-25 11:12:31 | INFO     | poker | Poker Game Server Started
+2026-03-25 11:12:31 | INFO     | poker | ==================================================
+2026-03-25 11:12:32 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 11:13:38 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 11:18:14 | INFO     | poker | ==================================================
+2026-03-25 11:18:14 | INFO     | poker | Poker Game Server Started
+2026-03-25 11:18:14 | INFO     | poker | ==================================================
+2026-03-25 11:21:23 | INFO     | poker | ==================================================
+2026-03-25 11:21:23 | INFO     | poker | Poker Game Server Started
+2026-03-25 11:21:23 | INFO     | poker | ==================================================
+2026-03-25 11:22:28 | INFO     | poker | ==================================================
+2026-03-25 11:22:28 | INFO     | poker | Poker Game Server Started
+2026-03-25 11:22:28 | INFO     | poker | ==================================================
+2026-03-25 11:22:28 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 13:53:50 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 13:54:07 | INFO     | poker | ==================================================
+2026-03-25 13:54:07 | INFO     | poker | Poker Game Server Started
+2026-03-25 13:54:07 | INFO     | poker | ==================================================
+2026-03-25 13:54:07 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 13:57:30 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 13:58:25 | INFO     | poker | ==================================================
+2026-03-25 13:58:25 | INFO     | poker | Poker Game Server Started
+2026-03-25 13:58:25 | INFO     | poker | ==================================================
+2026-03-25 13:58:25 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 13:59:23 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 13:59:58 | INFO     | poker | ==================================================
+2026-03-25 13:59:58 | INFO     | poker | Poker Game Server Started
+2026-03-25 13:59:58 | INFO     | poker | ==================================================
+2026-03-25 13:59:58 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 14:00:43 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 14:01:03 | INFO     | poker | ==================================================
+2026-03-25 14:01:03 | INFO     | poker | Poker Game Server Started
+2026-03-25 14:01:03 | INFO     | poker | ==================================================
+2026-03-25 14:01:03 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 14:02:23 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 14:30:22 | INFO     | poker | ==================================================
+2026-03-25 14:30:22 | INFO     | poker | Poker Game Server Started
+2026-03-25 14:30:22 | INFO     | poker | ==================================================
+2026-03-25 14:30:22 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 14:30:29 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 14:31:47 | INFO     | poker | ==================================================
+2026-03-25 14:31:47 | INFO     | poker | Poker Game Server Started
+2026-03-25 14:31:47 | INFO     | poker | ==================================================
+2026-03-25 14:31:47 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 14:33:10 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 14:33:26 | INFO     | poker | ==================================================
+2026-03-25 14:33:26 | INFO     | poker | Poker Game Server Started
+2026-03-25 14:33:26 | INFO     | poker | ==================================================
+2026-03-25 14:33:26 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 14:43:27 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 14:43:28 | INFO     | poker | ==================================================
+2026-03-25 14:43:28 | INFO     | poker | Poker Game Server Started
+2026-03-25 14:43:28 | INFO     | poker | ==================================================
+2026-03-25 14:43:39 | INFO     | poker | ==================================================
+2026-03-25 14:43:39 | INFO     | poker | Poker Game Server Started
+2026-03-25 14:43:39 | INFO     | poker | ==================================================
+2026-03-25 14:43:40 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 14:44:09 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 14:44:10 | INFO     | poker | ==================================================
+2026-03-25 14:44:10 | INFO     | poker | Poker Game Server Started
+2026-03-25 14:44:10 | INFO     | poker | ==================================================
+2026-03-25 14:44:10 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 14:44:12 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 14:58:37 | INFO     | poker | ==================================================
+2026-03-25 14:58:37 | INFO     | poker | Poker Game Server Started
+2026-03-25 14:58:37 | INFO     | poker | ==================================================
+2026-03-25 14:58:38 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 15:00:44 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 15:09:56 | INFO     | poker | ==================================================
+2026-03-25 15:09:56 | INFO     | poker | Poker Game Server Started
+2026-03-25 15:09:56 | INFO     | poker | ==================================================
+2026-03-25 15:09:56 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 15:11:13 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 15:16:08 | INFO     | poker | ==================================================
+2026-03-25 15:16:08 | INFO     | poker | Poker Game Server Started
+2026-03-25 15:16:08 | INFO     | poker | ==================================================
+2026-03-25 15:16:08 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 15:30:08 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 15:42:17 | INFO     | poker | ==================================================
+2026-03-25 15:42:17 | INFO     | poker | Poker Game Server Started
+2026-03-25 15:42:17 | INFO     | poker | ==================================================
+2026-03-25 15:42:17 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 15:44:39 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 15:47:32 | INFO     | poker | ==================================================
+2026-03-25 15:47:32 | INFO     | poker | Poker Game Server Started
+2026-03-25 15:47:32 | INFO     | poker | ==================================================
+2026-03-25 15:47:32 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 15:48:06 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 15:48:22 | INFO     | poker | ==================================================
+2026-03-25 15:48:22 | INFO     | poker | Poker Game Server Started
+2026-03-25 15:48:22 | INFO     | poker | ==================================================
+2026-03-25 15:48:22 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 15:49:38 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 15:53:05 | INFO     | poker | ==================================================
+2026-03-25 15:53:05 | INFO     | poker | Poker Game Server Started
+2026-03-25 15:53:05 | INFO     | poker | ==================================================
+2026-03-25 15:53:05 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 16:01:08 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 16:01:28 | INFO     | poker | ==================================================
+2026-03-25 16:01:28 | INFO     | poker | Poker Game Server Started
+2026-03-25 16:01:28 | INFO     | poker | ==================================================
+2026-03-25 16:01:28 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 16:02:11 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 16:02:23 | INFO     | poker | ==================================================
+2026-03-25 16:02:23 | INFO     | poker | Poker Game Server Started
+2026-03-25 16:02:23 | INFO     | poker | ==================================================
+2026-03-25 16:02:24 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 16:04:41 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 16:04:48 | INFO     | poker | ==================================================
+2026-03-25 16:04:48 | INFO     | poker | Poker Game Server Started
+2026-03-25 16:04:48 | INFO     | poker | ==================================================
+2026-03-25 16:04:48 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 16:11:32 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 16:19:53 | INFO     | poker | ==================================================
+2026-03-25 16:19:53 | INFO     | poker | Poker Game Server Started
+2026-03-25 16:19:53 | INFO     | poker | ==================================================
+2026-03-25 16:21:04 | INFO     | poker | ==================================================
+2026-03-25 16:21:04 | INFO     | poker | Poker Game Server Started
+2026-03-25 16:21:04 | INFO     | poker | ==================================================
+2026-03-25 16:21:04 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 16:23:03 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 16:26:34 | INFO     | poker | ==================================================
+2026-03-25 16:26:34 | INFO     | poker | Poker Game Server Started
+2026-03-25 16:26:34 | INFO     | poker | ==================================================
+2026-03-25 16:26:34 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 16:29:00 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 16:39:06 | INFO     | poker | ==================================================
+2026-03-25 16:39:06 | INFO     | poker | Poker Game Server Started
+2026-03-25 16:39:06 | INFO     | poker | ==================================================
+2026-03-25 16:39:06 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 16:43:20 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 16:44:44 | INFO     | poker | ==================================================
+2026-03-25 16:44:44 | INFO     | poker | Poker Game Server Started
+2026-03-25 16:44:44 | INFO     | poker | ==================================================
+2026-03-25 16:44:44 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 16:45:31 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 18:40:32 | INFO     | poker | ==================================================
+2026-03-25 18:40:32 | INFO     | poker | Poker Game Server Started
+2026-03-25 18:40:32 | INFO     | poker | ==================================================
+2026-03-25 18:40:32 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 18:56:16 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 18:56:43 | INFO     | poker | ==================================================
+2026-03-25 18:56:43 | INFO     | poker | Poker Game Server Started
+2026-03-25 18:56:43 | INFO     | poker | ==================================================
+2026-03-25 18:56:43 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 19:03:37 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 19:21:56 | INFO     | poker | ==================================================
+2026-03-25 19:21:56 | INFO     | poker | Poker Game Server Started
+2026-03-25 19:21:56 | INFO     | poker | ==================================================
+2026-03-25 19:21:56 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 19:43:42 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 19:52:36 | INFO     | poker | ==================================================
+2026-03-25 19:52:36 | INFO     | poker | Poker Game Server Started
+2026-03-25 19:52:36 | INFO     | poker | ==================================================
+2026-03-25 19:52:36 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 19:53:07 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 19:57:13 | INFO     | poker | ==================================================
+2026-03-25 19:57:13 | INFO     | poker | Poker Game Server Started
+2026-03-25 19:57:13 | INFO     | poker | ==================================================
+2026-03-25 19:57:13 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 20:54:02 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 20:54:22 | INFO     | poker | ==================================================
+2026-03-25 20:54:22 | INFO     | poker | Poker Game Server Started
+2026-03-25 20:54:22 | INFO     | poker | ==================================================
+2026-03-25 20:54:22 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 20:55:05 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 21:28:57 | INFO     | poker | ==================================================
+2026-03-25 21:28:57 | INFO     | poker | Poker Game Server Started
+2026-03-25 21:28:57 | INFO     | poker | ==================================================
+2026-03-25 21:28:57 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 21:29:08 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 21:29:14 | INFO     | poker | ==================================================
+2026-03-25 21:29:14 | INFO     | poker | Poker Game Server Started
+2026-03-25 21:29:14 | INFO     | poker | ==================================================
+2026-03-25 21:29:14 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 21:29:15 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 21:29:22 | INFO     | poker | ==================================================
+2026-03-25 21:29:22 | INFO     | poker | Poker Game Server Started
+2026-03-25 21:29:22 | INFO     | poker | ==================================================
+2026-03-25 21:29:22 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 22:16:50 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 22:39:31 | INFO     | poker | ==================================================
+2026-03-25 22:39:31 | INFO     | poker | Poker Game Server Started
+2026-03-25 22:39:31 | INFO     | poker | ==================================================
+2026-03-25 22:39:32 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 22:43:03 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 22:43:24 | INFO     | poker | ==================================================
+2026-03-25 22:43:24 | INFO     | poker | Poker Game Server Started
+2026-03-25 22:43:24 | INFO     | poker | ==================================================
+2026-03-25 22:43:24 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 23:26:05 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-25 23:36:47 | INFO     | poker | ==================================================
+2026-03-25 23:36:47 | INFO     | poker | Poker Game Server Started
+2026-03-25 23:36:47 | INFO     | poker | ==================================================
+2026-03-25 23:36:47 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-25 23:40:35 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-26 00:12:15 | INFO     | poker | ==================================================
+2026-03-26 00:12:15 | INFO     | poker | Poker Game Server Started
+2026-03-26 00:12:15 | INFO     | poker | ==================================================
+2026-03-26 00:12:15 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-26 00:13:11 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-26 00:25:13 | INFO     | poker | ==================================================
+2026-03-26 00:25:13 | INFO     | poker | Poker Game Server Started
+2026-03-26 00:25:13 | INFO     | poker | ==================================================
+2026-03-26 00:25:13 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-26 00:34:15 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-26 00:34:21 | INFO     | poker | ==================================================
+2026-03-26 00:34:21 | INFO     | poker | Poker Game Server Started
+2026-03-26 00:34:21 | INFO     | poker | ==================================================
+2026-03-26 00:34:21 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-26 00:34:53 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-26 00:35:25 | INFO     | poker | ==================================================
+2026-03-26 00:35:25 | INFO     | poker | Poker Game Server Started
+2026-03-26 00:35:25 | INFO     | poker | ==================================================
+2026-03-26 00:35:25 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-26 00:35:52 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-26 00:36:20 | INFO     | poker | ==================================================
+2026-03-26 00:36:20 | INFO     | poker | Poker Game Server Started
+2026-03-26 00:36:20 | INFO     | poker | ==================================================
+2026-03-26 00:36:21 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-26 00:43:46 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-26 11:13:29 | INFO     | poker | ==================================================
+2026-03-26 11:13:29 | INFO     | poker | Poker Game Server Started
+2026-03-26 11:13:29 | INFO     | poker | ==================================================
+2026-03-26 11:13:29 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-26 11:14:12 | INFO     | poker | [SYSTEM] Poker game server stopped

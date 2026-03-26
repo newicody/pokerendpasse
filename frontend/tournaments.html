@@ -1,0 +1,58 @@
+// frontend/js/table.js - améliorer la fonction updatePlayers
+function updatePlayers(players) {
+    const container = document.getElementById('playersContainer');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    // Position circulaire autour de la table
+    const radius = 280;
+    const centerX = 350;
+    const centerY = 300;
+    const angleStep = (2 * Math.PI) / players.length;
+    
+    players.forEach((player, index) => {
+        // Décaler l'angle pour que le joueur courant soit en bas
+        let angle = index * angleStep - Math.PI / 2;
+        
+        const x = centerX + radius * Math.cos(angle);
+        const y = centerY + radius * Math.sin(angle);
+        
+        const playerDiv = document.createElement('div');
+        playerDiv.className = 'player-seat';
+        if (player.user_id === window.currentUser?.id) {
+            playerDiv.classList.add('current-player');
+        }
+        if (player.is_dealer) {
+            playerDiv.classList.add('dealer');
+        }
+        playerDiv.style.left = `${x}px`;
+        playerDiv.style.top = `${y}px`;
+        
+        // Avatar
+        const avatarUrl = player.avatar ? `/assets/images/avatars/${player.avatar}.svg` : '/assets/images/avatars/default.svg';
+        
+        playerDiv.innerHTML = `
+            <div class="player-avatar" style="background-image: url('${avatarUrl}'); background-size: cover;"></div>
+            <div class="player-name">${escapeHtml(player.username)}</div>
+            <div class="player-chips">💰 ${player.chips || 0}</div>
+            ${player.current_bet > 0 ? `<div class="player-bet">Bet: ${player.current_bet}</div>` : ''}
+            <div class="player-cards">
+                ${player.hole_cards && player.user_id === window.currentUser?.id ? 
+                    player.hole_cards.map(card => {
+                        const suit = getSuitSymbol(card[0]);
+                        const rank = getRankDisplay(card.substring(1));
+                        const suitClass = getSuitClass(card[0]);
+                        return `<div class="card ${suitClass}">${rank}${suit}</div>`;
+                    }).join('') : 
+                    '<div class="card back"></div><div class="card back"></div>'
+                }
+            </div>
+            ${player.is_dealer ? '<div class="dealer-button-marker">D</div>' : ''}
+            ${player.is_small_blind ? '<div class="blind-marker">SB</div>' : ''}
+            ${player.is_big_blind ? '<div class="blind-marker">BB</div>' : ''}
+        `;
+        
+        container.appendChild(playerDiv);
+    });
+}
