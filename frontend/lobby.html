@@ -15,40 +15,46 @@
                 <h1>♠️ Poker Lobby ♥️</h1>
                 <a href="/" class="home-link">← Home</a>
                 <a href="/profile" id="profileLink" class="profile-link" style="display: none;">👤 Profile</a>
-                <button id="adminBtn" class="admin-btn" style="display: none;">👑 Admin</button>
+                <button id="adminBtn" class="admin-btn" style="display: none;" onclick="window.location.href='/admin'">👑 Admin</button>
+            </div>
+            <div class="server-time">
+                <span class="time-icon">🕐</span>
+                <span id="serverTime">--:--:--</span>
             </div>
             <div class="user-info" id="userInfo">
                 <div class="avatar" id="userAvatar"></div>
                 <div class="details">
                     <span id="username">Guest</span>
-                    <span id="chips">0 chips</span>
+                    <span id="userStatus" class="user-status-text"></span>
                 </div>
                 <div id="userActions">
                     <button id="loginBtn" class="btn-small">Login</button>
                     <button id="registerBtn" class="btn-small">Register</button>
                     <button id="logoutBtn" class="btn-small" style="display: none;">Logout</button>
+                    <button id="optionsBtn" class="btn-small" title="Settings">⚙️</button>
                 </div>
             </div>
         </div>
-        
+
         <!-- Guest warning -->
         <div id="guestWarning" class="warning-banner hidden">
-            ⚠️ You are in spectator mode. <a href="#" onclick="showLoginModal()">Login</a> or 
-            <a href="#" onclick="showRegisterModal()">Register</a> to play.
+            ⚠️ You are in spectator mode.
+            <a href="#" onclick="showLoginModal(); return false;">Login</a> or
+            <a href="#" onclick="showRegisterModal(); return false;">Register</a> to play.
         </div>
-        
+
         <!-- Main content with two columns -->
         <div class="lobby-content">
-            <!-- Left column: Active Games -->
+            <!-- Left column: Tournaments -->
             <div class="games-column">
-                <div class="section-header" style="margin-top: 30px;">
+                <div class="section-header" style="margin-top: 10px;">
                     <h2>🏆 Active Tournaments</h2>
                     <span class="section-badge">In Progress</span>
                 </div>
                 <div class="tournaments-grid" id="activeTournamentsGrid">
                     <div class="loading">Loading tournaments...</div>
                 </div>
-                
+
                 <div class="section-header" style="margin-top: 30px;">
                     <h2>📅 Upcoming Tournaments</h2>
                     <span class="section-badge">Register Now</span>
@@ -56,63 +62,48 @@
                 <div class="tournaments-grid" id="upcomingTournamentsGrid">
                     <div class="loading">Loading tournaments...</div>
                 </div>
-<!-- Dans le header du lobby, ajouter l'heure -->
-<div class="server-time">
-    <span class="time-icon">🕐</span>
-    <span id="serverTime">--:--:--</span>
-</div>
 
-<script>
-// Fonction pour afficher l'heure du serveur
-async function updateServerTime() {
-    try {
-        const response = await fetch('/api/server/time');
-        if (response.ok) {
-            const data = await response.json();
-            document.getElementById('serverTime').textContent = data.time;
-        }
-    } catch (error) {
-        console.error('Error fetching server time:', error);
-    }
-}
-// Mettre à jour toutes les secondes
-setInterval(updateServerTime, 1000);
-updateServerTime();
-</script>
+                <div class="section-header" style="margin-top: 30px;">
+                    <h2>🏁 Finished Tournaments</h2>
+                </div>
+                <div class="tournaments-grid" id="finishedTournamentsGrid">
+                    <div class="loading">Loading...</div>
+                </div>
             </div>
-            
+
             <!-- Right column: Chat -->
             <div class="chat-column">
-<!-- Dans la section chat, ajouter les boutons -->
-<div class="chat-header">
-    <h3>💬 Lobby Chat</h3>
-    <div class="chat-settings">
-        <button id="chatSettingsBtn" title="Chat Settings">⚙️</button>
-        <span id="chatUserCount" class="user-count">0 online</span>
-    </div>
-</div>
-<div class="chat-messages" id="chatMessages">
-    <div class="chat-welcome">Bienvenue au Grang tournament !</div>
-</div>
-<div class="chat-input-area">
-    <div class="smiley-picker">
-        <button class="smiley-btn" id="smileyBtn">😊</button>
-        <div class="smiley-dropdown" id="smileyDropdown"></div>
-    </div>
-    <input type="text" id="chatInput" placeholder="Type a message..." disabled>
-    <button id="chatSendBtn" disabled>Send</button>
-    <button id="mediaBtn" title="Send Media">📎</button>
-</div>
+                <div class="chat-container">
+                    <div class="chat-header">
+                        <h3>💬 Lobby Chat</h3>
+                        <div class="chat-settings">
+                            <button id="chatSettingsBtn" title="Chat Settings">⚙️</button>
+                            <span id="chatUserCount" class="user-count">0 online</span>
+                        </div>
+                    </div>
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="chat-welcome">Welcome to the Poker Lobby! 🎰</div>
+                    </div>
+                    <div class="chat-input-area">
+                        <div class="smiley-picker">
+                            <button class="smiley-btn" id="smileyBtn">😊</button>
+                            <div class="smiley-dropdown" id="smileyDropdown" style="display:none;"></div>
+                        </div>
+                        <input type="text" id="chatInput" placeholder="Type a message..." disabled>
+                        <button id="chatSendBtn" disabled>Send</button>
+                    </div>
+                </div>
             </div>
         </div>
-        
+
         <!-- Tournament Details Modal -->
-<div id="tournamentModal" class="modal">
-    <div class="modal-content tournament-modal">
-        <span class="close">&times;</span>
-        <div id="tournamentDetails"></div>
-    </div>
-</div>        
+        <div id="tournamentModal" class="modal">
+            <div class="modal-content tournament-modal">
+                <span class="close">&times;</span>
+                <div id="tournamentDetails"></div>
+            </div>
+        </div>
+
         <!-- Tournament Tables Modal -->
         <div id="tournamentTablesModal" class="modal">
             <div class="modal-content">
@@ -121,7 +112,7 @@ updateServerTime();
                 <div id="tournamentTablesList" class="tables-list"></div>
             </div>
         </div>
-        
+
         <!-- Login Modal -->
         <div id="loginModal" class="modal">
             <div class="modal-content">
@@ -144,7 +135,7 @@ updateServerTime();
                 </form>
             </div>
         </div>
-        
+
         <!-- Register Modal -->
         <div id="registerModal" class="modal">
             <div class="modal-content">
@@ -167,14 +158,14 @@ updateServerTime();
                 </form>
             </div>
         </div>
-        
-        <!-- Settings Modal -->
+
+        <!-- Options Modal -->
         <div id="optionsModal" class="modal">
             <div class="modal-content">
                 <span class="close">&times;</span>
-                <h2>Client Settings</h2>
+                <h2>⚙️ Settings</h2>
                 <div class="form-group">
-                    <label>Sound Effects:</label>
+                    <label>Sound:</label>
                     <select id="soundSetting">
                         <option value="on">On</option>
                         <option value="off">Off</option>
@@ -188,14 +179,56 @@ updateServerTime();
                         <option value="slow">Slow</option>
                     </select>
                 </div>
+                <div class="form-group">
+                    <label>Card Display:</label>
+                    <select id="cardDisplay">
+                        <option value="standard">Standard</option>
+                        <option value="large">Large</option>
+                        <option value="4color">4-Color Deck</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Auto Action:</label>
+                    <select id="autoAction">
+                        <option value="never">Never</option>
+                        <option value="check_fold">Check/Fold</option>
+                        <option value="call_any">Call Any</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Hand History:</label>
+                    <select id="showHistory">
+                        <option value="all">Show All</option>
+                        <option value="mine">My Hands Only</option>
+                        <option value="none">Hide</option>
+                    </select>
+                </div>
                 <button id="saveSettings" class="btn-primary">Save Settings</button>
             </div>
         </div>
-        
-        <!-- Toast notification -->
+
+        <!-- Chat Settings Modal -->
+        <div id="chatSettingsModal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>Chat Settings</h2>
+                <div class="form-group">
+                    <label><input type="checkbox" id="hideJoinMessages"> Hide join/leave messages</label>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="autoConvertSmileys" checked> Auto-convert smileys</label>
+                </div>
+                <button id="saveChatSettings" class="btn-primary">Save Settings</button>
+            </div>
+        </div>
+
+        <!-- Toast -->
         <div id="toast" class="toast"></div>
     </div>
-    
+
+    <!-- Scripts — ordre de chargement important -->
+    <script src="/js/settings_manager.js"></script>
+    <script src="/js/sound_manager.js"></script>
     <script src="/js/lobby.js"></script>
 </body>
 </html>

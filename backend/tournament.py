@@ -394,11 +394,11 @@ class TournamentManager:
         self.tournaments_dir.mkdir(parents=True, exist_ok=True)
         self.tournaments: Dict[str, Tournament] = {}
         self.lobby = lobby
-        # Verrou pour éviter les démarrages multiples
         self._starting: set = set()
+        self._monitor_task = None          # ← AJOUTÉ
         self._load_tournaments()
-        self._start_monitor()
-
+        # NE PAS appeler _start_monitor() ici
+        # Le monitor sera démarré par start_monitor_safe() dans startup_event
     # ── Persistance ───────────────────────────────────────────────────────────
 
 
@@ -471,6 +471,71 @@ class TournamentManager:
 
     def _start_monitor(self):
         asyncio.create_task(self._monitor_tournaments())
+        
+    def start_monitor_safe(self):
+        '''Appelé depuis startup_event quand l'event loop est active.'''
+        if self._monitor_task is None:
+            try:
+                self._monitor_task = asyncio.create_task(self._monitor_tournaments())
+                logger.info("Tournament monitor started")
+            except RuntimeError as e:
+                logger.error(f"Could not start monitor: {e}")
+ 
+ 
+    def get_tournament_info_extended(self, tournament) -> dict:
+        '''Retourne un dict enrichi pour l'API frontend.'''
+        if isinstance(tournament, str):
+            tournament = self.tournaments.get(tournament)
+        if not tournament:
+            return {}
+ 
+        base = tournament.to_dict()
+ 
+        # Joueurs inscrits
+        registered = [p for p in tournament.players if p.get('status') == 'registered']
+        base['registered_players'] = registered
+ 
+        # Classement (éliminés triés par rang)
+        base['ranking'] = sorted(
+            [p for p in tournament.players if p.get('eliminated_rank', 0) > 0],
+            key=lambda p: p.get('eliminated_rank', 999)
+        )
+ 
+        # Infos tables détaillées
+        tables_info = []
+        if self.lobby:
+            for tid in tournament.tables:
+                table = self.lobby.tables.get(tid)
+                if table:
+                    try:
+                        info = table.get_info()
+                        tables_info.append({
+                            'id': info.id,
+                            'name': info.name,
+                            'current_players': len(info.players),
+                            'max_players': info.max_players
+                        })
+                    except Exception as e:
+                        logger.error(f"Error getting table info {tid}: {e}")
+        base['tables_info'] = tables_info
+ 
+        # Prizes
+        try:
+            base['prizes'] = tournament.get_prize_structure()
+        except Exception:
+            base['prizes'] = []
+ 
+        # Temps avant début
+        now = datetime.utcnow()
+        if tournament.status == TournamentStatus.REGISTRATION:
+            delta = (tournament.start_time - now).total_seconds()
+            base['time_until_start'] = max(0, int(delta))
+        else:
+            base['time_until_start'] = None
+ 
+        base['can_register'] = tournament.can_register()
+ 
+        return base
 
     async def _monitor_tournaments(self):
         """

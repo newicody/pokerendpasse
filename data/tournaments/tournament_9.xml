@@ -11,9 +11,9 @@
 <buy_in>0</buy_in>
 <prize_pool>0</prize_pool>
 <itm_percentage>10.0</itm_percentage>
-<status>starting</status>
+<status>cancelled</status>
 <current_level>0</current_level>
-<created_at>2026-03-26T18:04:42.892505</created_at>
+<created_at>2026-03-26T22:44:26.654757</created_at>
 <level_started_at>2026-03-26T18:04:42.998262</level_started_at>
 <blind_structure>
 <level>

@@ -139,7 +139,10 @@ async def startup_event():
     await lobby.start()
     poker_logger.log_system("Poker game server started", "INFO")
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    
+ 
+    # Démarrer le monitor de tournois (event loop maintenant active)
+    tournament_manager.start_monitor_safe()
+ 
     # Nettoyer les vieux avatars
     try:
         now = datetime.utcnow()
@@ -151,14 +154,6 @@ async def startup_event():
                     logger.info(f"Deleted old avatar: {file.name}")
     except Exception as e:
         logger.error(f"Error cleaning avatars: {e}")
-
-@app.get("/api/server/time")
-async def server_time():
-    now = datetime.utcnow()
-    return json_response({
-        "time": now.strftime("%H:%M:%S"),
-        "iso": now.isoformat()
-    })
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -214,7 +209,12 @@ async def profile_page():
 @app.get("/api/server/time")
 async def server_time():
     now = datetime.utcnow()
-    return json_response({"time": now.strftime("%H:%M:%S"), "date": now.strftime("%Y-%m-%d"), "datetime": now.isoformat()})
+    return json_response({
+        "time": now.strftime("%H:%M:%S"),
+        "date": now.strftime("%Y-%m-%d"),
+        "datetime": now.isoformat(),
+        "iso": now.isoformat()
+    })
 
 # backend/main.py - Ajouter la route /api/tables manquante
 @app.get("/api/tables")
@@ -335,8 +335,8 @@ async def upload_avatar(file: UploadFile = File(...), current_user: Dict = Depen
 # Tournaments
 @app.get("/api/tournaments")
 async def list_tournaments():
-    tournaments = tournament_manager.get_active_tournaments()
-    return json_response(tournaments)
+    all_tournaments = tournament_manager.get_all_tournaments()
+    return json_response([t.to_dict() for t in all_tournaments])
 
 # backend/main.py - Modifier create_tournament
 # backend/main.py - Modifier la route create_tournament
@@ -389,8 +389,7 @@ async def get_tournament(tournament_id: str):
     tournament = tournament_manager.tournaments.get(tournament_id)
     if not tournament:
         raise HTTPException(status_code=404, detail="Tournament not found")
-    #return json_response(tournament.to_dict())
-    return json_response(tournament_manager.get_tournament_info_extended(t))
+    return json_response(tournament_manager.get_tournament_info_extended(tournament))
 
 @app.get("/api/tournaments/{tournament_id}/registered/{user_id}")
 async def check_tournament_registration(tournament_id: str, user_id: str):
@@ -488,46 +487,63 @@ async def admin_cancel_tournament(tournament_id: str, current_user: Dict = Depen
 @app.websocket("/ws/chat")
 async def chat_websocket(websocket: WebSocket):
     await websocket.accept()
-    logger.info("Chat WebSocket connected")
-    
+    user_id = None
+    username = None
+ 
     try:
-        data = await websocket.receive_json()
-        if data.get('type') == 'join':
-            user_id = data.get('user_id', f"guest_{len(chat_manager.connections)}")
-            username = data.get('username', 'Guest')
-            await chat_manager.add_connection(websocket, user_id, username)
-            
-            for msg in chat_manager.messages[-50:]:
-                await websocket.send_json(msg)
-            
-            try:
-                while True:
-                    msg_data = await websocket.receive_json()
-                    if msg_data.get('type') == 'message':
-                        await chat_manager.broadcast({'type': 'message', 'username': username, 'message': msg_data.get('message')})
-                    elif msg_data.get('type') == 'leave':
+        while True:
+            data = await websocket.receive_json()
+            msg_type = data.get('type', '')
+ 
+            if msg_type == 'join':
+                user_id = data.get('user_id', str(uuid.uuid4()))
+                username = data.get('username', 'Guest')
+                await chat_manager.add_connection(websocket, user_id, username)
+                # Envoyer l'historique récent
+                for msg in chat_manager.messages[-50:]:
+                    try:
+                        await websocket.send_json(msg)
+                    except Exception:
                         break
-            except:
-                pass
-    except:
+ 
+            elif msg_type == 'message' and user_id:
+                text = data.get('message', '').strip()
+                if text:
+                    await chat_manager.broadcast({
+                        'type': 'message',
+                        'user_id': user_id,
+                        'username': username,
+                        'message': text
+                    })
+ 
+            elif msg_type == 'media' and user_id:
+                await chat_manager.broadcast({
+                    'type': 'message',
+                    'user_id': user_id,
+                    'username': username,
+                    'message': data.get('filename', 'media'),
+                    'mediaType': data.get('mediaType'),
+                    'data': data.get('data'),
+                    'filename': data.get('filename')
+                })
+ 
+            elif msg_type == 'ping':
+                await websocket.send_json({'type': 'pong'})
+ 
+    except WebSocketDisconnect:
         pass
+    except Exception as e:
+        logger.error(f"Chat WS error: {e}")
     finally:
-        await chat_manager.remove_connection(user_id if 'user_id' in locals() else None)
-
+        if user_id:
+            await chat_manager.remove_connection(user_id)
 
 @app.get("/api/users/{user_id}")
 async def get_user(user_id: str):
-    """Récupère un utilisateur par son ID"""
-    user = await lobby.get_user(user_id)
+    user = auth_manager.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return json_response({
-        "id": user.id,
-        "username": user.username,
-        "email": user.email,
-        "avatar": user.avatar,
-        "is_admin": user.is_admin
-    })
+    return json_response(user)
 
 @app.post("/api/users")
 async def create_user(request: CreateUserRequest):
@@ -793,22 +809,53 @@ async def change_password(
 # ==================== WEBSOCKET TABLE ROUTES ====================
 @app.websocket("/ws/{table_id}/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, table_id: str, user_id: str):
-    """WebSocket pour les tables de poker"""
     await websocket.accept()
-    await ws_manager.connect(websocket, table_id, user_id)
-    
-    poker_logger.log_connection("connected", user_id, table_id)
-    
+ 
     table = lobby.tables.get(table_id)
-    if not table or user_id not in table.players:
-        await websocket.send_json({"type": "error", "message": "You are not at this table"})
+    if not table:
+        await websocket.send_json({"type": "error", "message": "Table not found"})
         await websocket.close()
         return
-    
+ 
+    # Déterminer si c'est un spectateur
+    is_spectator = (user_id == 'spectator'
+                    or user_id.startswith('spectator_')
+                    or user_id not in table.players)
+ 
+    # Donner un ID unique aux spectateurs
+    original_uid = user_id
+    if user_id == 'spectator':
+        user_id = f"spectator_{uuid.uuid4().hex[:8]}"
+ 
+    await ws_manager.connect(websocket, table_id, user_id)
+    poker_logger.log_connection("connected", user_id, table_id)
+ 
+    # Envoyer l'état initial
+    try:
+        state = table.get_state()
+        # Masquer les cartes fermées pour les spectateurs
+        if is_spectator and isinstance(state, dict) and 'players' in state:
+            import copy
+            state = copy.deepcopy(state)
+            for p in state.get('players', []):
+                p['hole_cards'] = []
+        await websocket.send_json({
+            "type": "game_state",
+            "data": state,
+            "is_spectator": is_spectator
+        })
+    except Exception as e:
+        logger.error(f"Error sending initial state: {e}")
+ 
     try:
         while True:
             data = await websocket.receive_json()
-            
+ 
+            if is_spectator:
+                if data.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+                continue
+ 
             if data.get("type") == "action":
                 action = PlayerActionRequest(
                     user_id=user_id,
@@ -817,16 +864,16 @@ async def websocket_endpoint(websocket: WebSocket, table_id: str, user_id: str):
                     amount=data.get("amount", 0)
                 )
                 await table.handle_player_action(action.user_id, action.action, action.amount)
-                
+ 
                 state = table.get_state()
                 await ws_manager.broadcast_to_table(table_id, {
                     "type": "game_update",
                     "data": state
                 })
-                
+ 
             elif data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
-                
+ 
     except WebSocketDisconnect:
         poker_logger.log_connection("disconnected", user_id, table_id)
     finally:
