@@ -431,7 +431,7 @@ class TournamentManager:
     def save_tournament(self, tournament: Tournament):
         root = tournament.to_xml()
         tree = ET.ElementTree(root)
-        ET.indent(tree, space='')
+        ET.indent(tree, space='', newline='')
         path = self.tournaments_dir / f"{tournament.id}.xml"
         try:
             tree.write(str(path), encoding='utf-8', xml_declaration=True)

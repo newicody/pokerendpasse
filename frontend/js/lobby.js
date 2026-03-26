@@ -1,799 +1,995 @@
-// frontend/js/lobby.js
-let refreshInterval = null;
-let currentUser = null;
-let isGuest = false;
-let chatWs = null;
+/**
+ * lobby.js — Page principale du lobby pokerndpasse
+ *
+ * Dépendances (charger avant ce fichier) :
+ *   /js/sound_manager.js
+ *   /js/theme_manager.js
+ *   /js/settings_manager.js
+ *
+ * Structure :
+ *   1.  État global
+ *   2.  Utilitaires DOM / formatage
+ *   3.  Gestionnaire de clocks live
+ *   4.  Auth (checkAuth, login, register, logout)
+ *   5.  Affichage utilisateur
+ *   6.  Chargement & rendu des tournois
+ *   7.  Détails du tournoi (modal)
+ *   8.  Actions tournoi (inscription / désinscription)
+ *   9.  Tables de spectating
+ *  10.  Chat WebSocket
+ *  11.  Options / paramètres
+ *  12.  Heure serveur
+ *  13.  Initialisation
+ */
 
-// frontend/js/lobby.js - Ajouter au début
-function loadTheme() {
-    const savedTheme = localStorage.getItem('poker_theme') || 'dark';
-    document.body.className = `theme-${savedTheme}`;
-    
-    // Appliquer le CSS personnalisé
-    const customCss = localStorage.getItem('poker_custom_css');
-    if (customCss) {
-        let styleTag = document.getElementById('custom-css');
-        if (!styleTag) {
-            styleTag = document.createElement('style');
-            styleTag.id = 'custom-css';
-            document.head.appendChild(styleTag);
-        }
-        styleTag.textContent = customCss;
-    }
-    
-    const customCssUrl = localStorage.getItem('poker_custom_css_url');
-    if (customCssUrl) {
-        let linkTag = document.getElementById('custom-css-link');
-        if (!linkTag) {
-            linkTag = document.createElement('link');
-            linkTag.id = 'custom-css-link';
-            linkTag.rel = 'stylesheet';
-            document.head.appendChild(linkTag);
-        }
-        linkTag.href = customCssUrl;
-    }
+'use strict';
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 1. État global
+// ═════════════════════════════════════════════════════════════════════════════
+
+let currentUser     = null;
+let isGuest         = false;
+let chatWs          = null;
+let _refreshInterval = null;
+
+// Registre des setInterval actifs (clocks live)
+const _clocks = {};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 2. Utilitaires DOM / formatage
+// ═════════════════════════════════════════════════════════════════════════════
+
+/** Échappe les caractères HTML dangereux */
+function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.textContent = text ?? '';
+    return d.innerHTML;
 }
 
-// Appeler loadTheme() dans init()
-
-async function init() {
-    console.log('Initializing lobby...');
-    loadTheme();
-    await checkAuth();
-    await loadTournaments();
-    
-    if (refreshInterval) clearInterval(refreshInterval);
-    refreshInterval = setInterval(() => {
-        loadTournaments();
-    }, 5000);
-    
-    setupEventListeners();
-    setupAuthModals();
-    setupOptionsModal();
-    initChat();
-    updateServerTime();
-    setInterval(updateServerTime, 1000);
+/** Formate un timestamp ISO en locale string */
+function formatDate(isoStr) {
+    if (!isoStr) return 'N/A';
+    try { return new Date(isoStr).toLocaleString(); }
+    catch (_) { return isoStr; }
 }
+
+/** Formate un compte à rebours en secondes → chaîne lisible */
+function formatCountdown(secs, short = false) {
+    if (secs === null || secs === undefined || secs < 0) return '—';
+    secs = Math.floor(secs);
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    if (short) {
+        if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+        return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    }
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+}
+
+/** Suffixe ordinal (1st, 2nd, 3rd…) */
+function getOrdinal(n) {
+    const s = ['th','st','nd','rd'], v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+/** Timestamp UTC courant en secondes */
+function nowUTC() { return Date.now() / 1000; }
+
+/** Parse une chaîne ISO → timestamp UTC secondes */
+function isoToSec(iso) {
+    if (!iso) return null;
+    try { return new Date(iso).getTime() / 1000; }
+    catch (_) { return null; }
+}
+
+/** Affiche une notification toast */
+function showToast(message, type = 'info') {
+    SoundManager.play(type === 'success' ? 'toast_success' : type === 'error' ? 'toast_error' : 'notify');
+    const el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = message;
+    el.className   = `toast ${type} show`;
+    clearTimeout(el._hideTimer);
+    el._hideTimer = setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+/** Ferme un modal par son ID */
+function closeModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 3. Gestionnaire de clocks live
+// ═════════════════════════════════════════════════════════════════════════════
+
+function _clearClock(key) {
+    if (_clocks[key]) { clearInterval(_clocks[key]); delete _clocks[key]; }
+}
+
+function _clearClocksBy(prefix) {
+    Object.keys(_clocks).filter(k => k.startsWith(prefix)).forEach(_clearClock);
+}
+
+/** Démarre un interval nommé (arrête l'ancien s'il existe) */
+function _startClock(key, fn, ms = 1000) {
+    _clearClock(key);
+    fn();  // exécution immédiate
+    _clocks[key] = setInterval(fn, ms);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 4. Auth
+// ═════════════════════════════════════════════════════════════════════════════
 
 async function checkAuth() {
     try {
-        const response = await fetch('/api/auth/me');
-        if (response.ok) {
-            currentUser = await response.json();
-            isGuest = false;
-            console.log('User logged in:', currentUser.username);
-            
-            if (currentUser.is_admin) {
-                const adminBtn = document.getElementById('adminBtn');
-                if (adminBtn) adminBtn.style.display = 'inline-block';
-            }
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+            currentUser = await res.json();
+            isGuest     = false;
         } else {
-            isGuest = true;
-            currentUser = { username: 'Guest', id: null, avatar: null };
-            console.log('Guest mode');
+            _setGuest();
         }
-        updateUserDisplay();
-    } catch (error) {
-        console.error('Auth check failed:', error);
-        isGuest = true;
-        currentUser = { username: 'Guest', id: null, avatar: null };
-        updateUserDisplay();
+    } catch (_) {
+        _setGuest();
+    }
+    updateUserDisplay();
+}
+
+function _setGuest() {
+    isGuest     = true;
+    currentUser = { username: 'Guest', id: null, avatar: null, is_admin: false };
+}
+
+async function login(username, password, remember = false) {
+    try {
+        const res = await fetch('/api/auth/login', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ username, password, remember_me: remember }),
+        });
+        if (res.ok) {
+            currentUser = await res.json();
+            isGuest     = false;
+            updateUserDisplay();
+            closeModal('loginModal');
+            showToast(`Bienvenue, ${currentUser.username} !`, 'success');
+            SoundManager.play('connect');
+            await loadTournaments();
+            if (chatWs) chatWs.close();
+            initChat();
+        } else {
+            const err = await res.json().catch(() => ({}));
+            showToast(err.detail || 'Connexion échouée', 'error');
+        }
+    } catch (_) {
+        showToast('Erreur de connexion', 'error');
     }
 }
 
-function updateUserDisplay() {
-    const usernameSpan = document.getElementById('username');
-    const loginBtn = document.getElementById('loginBtn');
-    const registerBtn = document.getElementById('registerBtn');
-    const logoutBtn = document.getElementById('logoutBtn');
-    const profileLink = document.getElementById('profileLink');
-    const guestWarning = document.getElementById('guestWarning');
-    const userAvatar = document.getElementById('userAvatar');
-    
-    if (usernameSpan) usernameSpan.textContent = currentUser.username;
-    
-    if (currentUser && !isGuest) {
-        if (loginBtn) loginBtn.style.display = 'none';
-        if (registerBtn) registerBtn.style.display = 'none';
-        if (logoutBtn) logoutBtn.style.display = 'block';
-        if (profileLink) profileLink.style.display = 'inline-block';
-        if (guestWarning) guestWarning.classList.add('hidden');
-        
-        if (userAvatar && currentUser.avatar) {
-            const predefinedAvatars = ['default', 'panda', 'tiger', 'dragon', 'phoenix'];
-            let avatarUrl;
-            
-            if (predefinedAvatars.includes(currentUser.avatar)) {
-                avatarUrl = `/assets/images/avatars/${currentUser.avatar}.svg`;
-            } else {
-                avatarUrl = currentUser.avatar;
-            }
-            
-            userAvatar.style.backgroundImage = `url('${avatarUrl}')`;
-            userAvatar.style.backgroundSize = 'cover';
-            userAvatar.style.backgroundPosition = 'center';
-            userAvatar.style.backgroundColor = 'transparent';
-        } else if (userAvatar) {
-            userAvatar.style.backgroundImage = '';
-            userAvatar.style.backgroundColor = 'linear-gradient(135deg, #ffd700, #ffb347)';
+async function register(username, password, email) {
+    try {
+        const res = await fetch('/api/auth/register', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ username, password, email: email || null }),
+        });
+        if (res.ok) {
+            closeModal('registerModal');
+            showToast('Inscription réussie ! Connectez-vous.', 'success');
+            showLoginModal();
+        } else {
+            const err = await res.json().catch(() => ({}));
+            showToast(err.detail || 'Inscription échouée', 'error');
         }
-    } else {
-        if (loginBtn) loginBtn.style.display = 'block';
-        if (registerBtn) registerBtn.style.display = 'block';
-        if (logoutBtn) logoutBtn.style.display = 'none';
-        if (profileLink) profileLink.style.display = 'none';
-        if (guestWarning) guestWarning.classList.remove('hidden');
-        if (userAvatar) userAvatar.style.backgroundImage = '';
+    } catch (_) {
+        showToast("Erreur d'inscription", 'error');
     }
 }
+
+async function logout() {
+    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (_) {}
+    if (chatWs) { chatWs.close(); chatWs = null; }
+    _setGuest();
+    updateUserDisplay();
+    showToast('Déconnexion réussie', 'info');
+    SoundManager.play('disconnect');
+    await loadTournaments();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 5. Affichage utilisateur
+// ═════════════════════════════════════════════════════════════════════════════
+
+const PREDEFINED_AVATARS = ['default','panda','tiger','dragon','phoenix'];
+
+function updateUserDisplay() {
+    _q('username',    el => el.textContent = currentUser?.username ?? 'Guest');
+    _q('chips',       el => el.textContent = currentUser?.chips
+                                             ? `${Number(currentUser.chips).toLocaleString()} chips`
+                                             : '');
+    _q('loginBtn',    el => el.style.display    = isGuest ? 'block' : 'none');
+    _q('registerBtn', el => el.style.display    = isGuest ? 'block' : 'none');
+    _q('logoutBtn',   el => el.style.display    = isGuest ? 'none'  : 'block');
+    _q('profileLink', el => el.style.display    = isGuest ? 'none'  : 'inline-block');
+    _q('adminBtn',    el => el.style.display    = (!isGuest && currentUser?.is_admin) ? 'inline-block' : 'none');
+    _q('guestWarning',el => el.classList.toggle('hidden', !isGuest));
+
+    const avatar = document.getElementById('userAvatar');
+    if (avatar) {
+        if (!isGuest && currentUser?.avatar) {
+            const url = PREDEFINED_AVATARS.includes(currentUser.avatar)
+                ? `/assets/images/avatars/${currentUser.avatar}.svg`
+                : currentUser.avatar;
+            Object.assign(avatar.style, {
+                backgroundImage:    `url('${url}')`,
+                backgroundSize:     'cover',
+                backgroundPosition: 'center',
+                backgroundColor:    'transparent',
+            });
+        } else {
+            avatar.style.backgroundImage = '';
+        }
+    }
+}
+
+/** Raccourci getElementById sécurisé */
+function _q(id, fn) {
+    const el = document.getElementById(id);
+    if (el) fn(el);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 6. Chargement & rendu des tournois
+// ═════════════════════════════════════════════════════════════════════════════
 
 async function loadTournaments() {
     try {
-        const response = await fetch('/api/tournaments');
-        if (!response.ok) throw new Error('Failed to load tournaments');
-        const tournaments = await response.json();
-        
-        const activeTournaments = tournaments.filter(t => t.status === 'in_progress');
-        const upcomingTournaments = tournaments.filter(t => t.status === 'registration');
-        
-        renderActiveTournaments(activeTournaments);
-        renderUpcomingTournaments(upcomingTournaments);
-    } catch (error) {
-        console.error('Error loading tournaments:', error);
+        const res  = await fetch('/api/tournaments');
+        if (!res.ok) throw new Error('API error');
+        const all  = await res.json();
+
+        const active   = all.filter(t => t.status === 'in_progress');
+        const upcoming = all.filter(t => t.status === 'registration' || t.status === 'starting');
+        const finished = all.filter(t => t.status === 'finished').slice(0, 5);
+
+        renderActiveTournaments(active);
+        renderUpcomingTournaments(upcoming);
+        renderFinishedTournaments(finished);
+    } catch (e) {
+        console.error('loadTournaments error:', e);
     }
 }
+
+// ── Tournois actifs ──────────────────────────────────────────────────────────
 
 function renderActiveTournaments(tournaments) {
     const grid = document.getElementById('activeTournamentsGrid');
     if (!grid) return;
-    
-    if (!tournaments || tournaments.length === 0) {
-        grid.innerHTML = '<div class="loading">No active tournaments</div>';
+
+    _clearClocksBy('active_');
+
+    if (!tournaments.length) {
+        grid.innerHTML = '<div class="empty-state">Aucun tournoi en cours</div>';
         return;
     }
-    
+
     grid.innerHTML = tournaments.map(t => `
-        <div class="tournament-card" onclick="window.showTournamentTables('${t.id}')">
-            <div class="tournament-header">
-                <div class="tournament-name">🏆 ${escapeHtml(t.name)}</div>
-                <div class="tournament-status in_progress">In Progress</div>
+        <div class="tournament-card tournament-card--active" id="acard-${t.id}">
+            <div class="tournament-card__header">
+                <span class="tournament-card__name">🏆 ${escapeHtml(t.name)}</span>
+                <span class="badge badge--progress">🎲 En cours</span>
             </div>
-            <div class="tournament-details">
-                <div><span class="label">Players:</span> <span class="value">${t.players_count}/${t.max_players}</span></div>
-                <div><span class="label">Started:</span> <span class="value">${new Date(t.start_time).toLocaleString()}</span></div>
-                <div><span class="label">Current Blinds:</span> <span class="value">${t.current_blinds?.small_blind}/${t.current_blinds?.big_blind}</span></div>
+            <div class="tournament-card__info">
+                <div><span class="label">Joueurs :</span>
+                     <span class="value">${t.players_count}</span></div>
+                <div><span class="label">Niveau :</span>
+                     <span class="value">${t.current_level}</span></div>
+                <div><span class="label">Blinds :</span>
+                     <span class="value">${t.current_blinds?.small_blind ?? '?'}/${t.current_blinds?.big_blind ?? '?'}</span></div>
             </div>
-            <button class="spectate-btn" onclick="event.stopPropagation(); window.showTournamentTables('${t.id}')">View Tables</button>
+            <div class="clock-bar">
+                <span class="clock-bar__label">⏱ Prochain niveau :</span>
+                <span class="clock-bar__value" id="blind-clock-${t.id}">—</span>
+            </div>
+            <button class="btn-spectate"
+                onclick="event.stopPropagation(); window.showTournamentTables('${t.id}')">
+                👁 Voir les tables
+            </button>
         </div>
     `).join('');
+
+    // Clock par tournoi
+    tournaments.forEach(t => {
+        let secs = t.seconds_until_next_level ?? null;
+        _startClock(`active_${t.id}`, () => {
+            const el = document.getElementById(`blind-clock-${t.id}`);
+            if (!el) { _clearClock(`active_${t.id}`); return; }
+            if (secs === null) { el.textContent = '—'; return; }
+            el.textContent  = formatCountdown(secs, true);
+            el.style.color  = secs <= 30 ? 'var(--color-danger)' : secs <= 60 ? 'var(--color-warn)' : 'var(--color-ok)';
+            if (secs === 30) SoundManager.play('tick_urgent');
+            else if (secs > 0 && secs <= 10) SoundManager.play('tick');
+            if (secs === 0) SoundManager.play('blind_up');
+            secs = Math.max(0, secs - 1);
+        });
+    });
 }
+
+// ── Tournois à venir ─────────────────────────────────────────────────────────
 
 function renderUpcomingTournaments(tournaments) {
     const grid = document.getElementById('upcomingTournamentsGrid');
     if (!grid) return;
-    
-    if (!tournaments || tournaments.length === 0) {
-        grid.innerHTML = '<div class="loading">No upcoming tournaments</div>';
+
+    _clearClocksBy('upcoming_');
+
+    if (!tournaments.length) {
+        grid.innerHTML = '<div class="empty-state">Aucun tournoi programmé</div>';
         return;
     }
-    
-    const now = new Date();
-    
-    grid.innerHTML = tournaments.map(t => {
-        const regStart = new Date(t.registration_start);
-        const regEnd = new Date(t.registration_end);
-        
-        let canRegister = now >= regStart && now < regEnd;
-        let statusText = canRegister ? '✅ Open' : (now < regStart ? '📅 Soon' : '⏰ Closed');
-        
-        return `
-            <div class="tournament-card">
-                <div class="tournament-header">
-                    <div class="tournament-name">📅 ${escapeHtml(t.name)}</div>
-                    <div class="tournament-status registration">${statusText}</div>
-                </div>
-                <div class="tournament-details">
-                    <div><span class="label">Starts:</span> <span class="value">${new Date(t.start_time).toLocaleString()}</span></div>
-                    <div><span class="label">Reg closes:</span> <span class="value">${new Date(t.registration_end).toLocaleString()}</span></div>
-                    <div><span class="label">Players:</span> <span class="value">${t.players_count}/${t.max_players}</span></div>
-                </div>
-                <button class="register-btn" onclick="window.showTournamentDetails('${t.id}')">
-                    ${canRegister ? 'Register Now' : 'View Details'}
-                </button>
+
+    grid.innerHTML = tournaments.map(t => `
+        <div class="tournament-card" id="ucard-${t.id}">
+            <div class="tournament-card__header">
+                <span class="tournament-card__name">📅 ${escapeHtml(t.name)}</span>
+                <span class="badge" id="ubadge-${t.id}">…</span>
             </div>
-        `;
-    }).join('');
+            <div class="tournament-card__info">
+                <div><span class="label">Départ :</span>
+                     <span class="value">${formatDate(t.start_time)}</span></div>
+                <div><span class="label">Inscr. :</span>
+                     <span class="value">${formatDate(t.registration_end)}</span></div>
+                <div><span class="label">Joueurs :</span>
+                     <span class="value">${t.players_count}/${t.max_players}</span></div>
+                ${t.prize_pool ? `<div><span class="label">Prize :</span>
+                     <span class="value">💰 ${Number(t.prize_pool).toLocaleString()}</span></div>` : ''}
+            </div>
+            <div class="clock-bar">
+                <span class="clock-bar__label" id="uclabel-${t.id}">…</span>
+                <span class="clock-bar__value" id="uclock-${t.id}">—</span>
+            </div>
+            <button class="btn-register" onclick="window.showTournamentDetails('${t.id}')">
+                Voir / S'inscrire
+            </button>
+        </div>
+    `).join('');
+
+    tournaments.forEach(t => {
+        const regStartSec = isoToSec(t.registration_start);
+        const regEndSec   = isoToSec(t.registration_end);
+        const startSec    = isoToSec(t.start_time);
+
+        _startClock(`upcoming_${t.id}`, () => {
+            const now      = nowUTC();
+            const clockEl  = document.getElementById(`uclock-${t.id}`);
+            const labelEl  = document.getElementById(`uclabel-${t.id}`);
+            const badgeEl  = document.getElementById(`ubadge-${t.id}`);
+            if (!clockEl) { _clearClock(`upcoming_${t.id}`); return; }
+
+            if (now < regStartSec) {
+                const d = regStartSec - now;
+                labelEl.textContent = '🕐 Inscriptions dans :';
+                clockEl.textContent = formatCountdown(d);
+                clockEl.style.color = 'var(--color-ok)';
+                badgeEl.textContent = '📅 Bientôt';
+                badgeEl.className   = 'badge badge--soon';
+            } else if (now < regEndSec) {
+                const d = regEndSec - now;
+                labelEl.textContent = '✅ Ferme dans :';
+                clockEl.textContent = formatCountdown(d);
+                clockEl.style.color = d < 300 ? 'var(--color-danger)' : 'var(--color-ok)';
+                badgeEl.textContent = '✅ Ouvert';
+                badgeEl.className   = 'badge badge--open';
+            } else if (now < startSec) {
+                const d = startSec - now;
+                labelEl.textContent = '🎯 Départ dans :';
+                clockEl.textContent = formatCountdown(d);
+                clockEl.style.color = d < 120 ? 'var(--color-danger)' : 'var(--color-warn)';
+                badgeEl.textContent = '⏰ Fermé';
+                badgeEl.className   = 'badge badge--closed';
+            } else {
+                labelEl.textContent = '';
+                clockEl.textContent = '🚀 En cours !';
+                badgeEl.textContent = '🎲 En jeu';
+                badgeEl.className   = 'badge badge--progress';
+            }
+        });
+    });
 }
 
-// frontend/js/lobby.js - Remplacer la fonction showTournamentDetails
+// ── Tournois terminés ─────────────────────────────────────────────────────────
+
+function renderFinishedTournaments(tournaments) {
+    const grid = document.getElementById('finishedTournamentsGrid');
+    if (!grid) return;
+    if (!tournaments.length) {
+        grid.innerHTML = '<div class="empty-state">Aucun tournoi terminé récemment</div>';
+        return;
+    }
+    grid.innerHTML = tournaments.map(t => `
+        <div class="tournament-card tournament-card--finished">
+            <div class="tournament-card__header">
+                <span class="tournament-card__name">🏁 ${escapeHtml(t.name)}</span>
+                <span class="badge badge--finished">Terminé</span>
+            </div>
+            <div class="tournament-card__info">
+                <div><span class="label">Joueurs :</span> <span class="value">${t.total_players}</span></div>
+                <div><span class="label">Débuté :</span> <span class="value">${formatDate(t.start_time)}</span></div>
+            </div>
+            <button class="btn-secondary btn-sm"
+                onclick="window.showTournamentDetails('${t.id}')">Résultats</button>
+        </div>
+    `).join('');
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 7. Détails du tournoi (modal)
+// ═════════════════════════════════════════════════════════════════════════════
+
 window.showTournamentDetails = async function(tournamentId) {
+    // Arrêter les clocks modales précédentes
+    _clearClocksBy('modal_');
+    SoundManager.play('flip');
+
     try {
-        const response = await fetch(`/api/tournaments/${tournamentId}`);
-        if (!response.ok) throw new Error('Failed to load tournament');
-        const tournament = await response.json();
-        
-        // Vérifier si l'utilisateur est inscrit
+        const [tRes, regRes] = await Promise.all([
+            fetch(`/api/tournaments/${tournamentId}`),
+            (!isGuest && currentUser?.id)
+                ? fetch(`/api/tournaments/${tournamentId}/registered/${currentUser.id}`)
+                : Promise.resolve(null),
+        ]);
+
+        if (!tRes.ok) throw new Error('Tournoi introuvable');
+        const t = await tRes.json();
+
         let isRegistered = false;
-        if (currentUser && !isGuest && currentUser.id) {
-            const regResponse = await fetch(`/api/tournaments/${tournamentId}/registered/${currentUser.id}`);
-            if (regResponse.ok) {
-                const regData = await regResponse.json();
-                isRegistered = regData.registered;
-            }
+        if (regRes?.ok) {
+            const rd = await regRes.json();
+            isRegistered = rd.registered;
         }
-        
-        const modal = document.getElementById('tournamentModal');
+
+        const modal      = document.getElementById('tournamentModal');
         const detailsDiv = document.getElementById('tournamentDetails');
-        
-        const formatDate = (dateStr) => {
-            if (!dateStr) return 'N/A';
-            return new Date(dateStr).toLocaleString();
-        };
-        
-        const formatTime = (seconds) => {
-            if (!seconds) return 'N/A';
-            const hours = Math.floor(seconds / 3600);
-            const minutes = Math.floor((seconds % 3600) / 60);
-            if (hours > 0) return `${hours}h ${minutes}m`;
-            if (minutes > 0) return `${minutes}m`;
-            return `${seconds}s`;
-        };
-        
-        // Structure des prix
-        const prizesHtml = tournament.prizes && tournament.prizes.length ? 
-            tournament.prizes.map(p => `
-                <div class="prize-item">
-                    <span>🏆 ${p.rank}${getOrdinal(p.rank)} place</span>
+        if (!modal || !detailsDiv) return;
+
+        // ── Prix ──────────────────────────────────────────────────────────────
+        const prizesHtml = t.prizes?.length
+            ? t.prizes.map(p => `
+                <div class="prize-item ${p.rank <= 3 ? 'prize-item--top' : ''}">
+                    <span>🏆 ${getOrdinal(p.rank)}</span>
                     <span>💰 ${p.amount.toLocaleString()} chips (${p.percentage}%)</span>
-                </div>
-            `).join('') : '<div class="empty-message">No prize pool - ranking only</div>';
-        
-        // Liste des joueurs inscrits
-        const playersHtml = tournament.registered_players && tournament.registered_players.length ?
-            tournament.registered_players.map(p => `
+                </div>`).join('')
+            : '<div class="empty-state">Pas de prize pool — classement seul</div>';
+
+        // ── Joueurs ───────────────────────────────────────────────────────────
+        const playersHtml = t.registered_players?.length
+            ? t.registered_players.map(p => `
                 <div class="player-item">
                     <span>👤 ${escapeHtml(p.username)}</span>
-                    <small>Registered: ${formatDate(p.registered_at)}</small>
-                </div>
-            `).join('') : '<div class="empty-message">No players registered yet</div>';
-        
-        // Structure des blinds
-        const blindsHtml = tournament.blind_structure && tournament.blind_structure.length ?
-            tournament.blind_structure.map(level => `
-                <div class="blind-level-item">
-                    <span class="level-num">Level ${level.level}</span>
-                    <span class="level-blinds">${level.small_blind}/${level.big_blind}</span>
-                    <span class="level-duration">⏱️ ${level.duration} min</span>
-                </div>
-            `).join('') : '<div class="empty-message">No blind structure configured</div>';
-        
-        // Informations générales
+                    <small>${formatDate(p.registered_at)}</small>
+                </div>`).join('')
+            : '<div class="empty-state">Aucun joueur inscrit</div>';
+
+        // ── Blinds ────────────────────────────────────────────────────────────
+        const currentLvl = t.current_level ?? 1;
+        const blindsHtml = t.blind_structure?.length
+            ? t.blind_structure.map(lv => `
+                <div class="blind-level-item ${lv.level === currentLvl ? 'blind-level-item--current' : ''}">
+                    <span class="level-num">${lv.level === currentLvl ? '▶ ' : ''}Niv. ${lv.level}</span>
+                    <span>${lv.small_blind}/${lv.big_blind}</span>
+                    <span>⏱ ${lv.duration} min</span>
+                </div>`).join('')
+            : '<div class="empty-state">Structure non définie</div>';
+
+        // ── Classement (tournoi en cours) ─────────────────────────────────────
+        const rankingHtml = t.ranking?.length
+            ? t.ranking.slice(0,20).map((p, i) => `
+                <div class="player-item ${p.status === 'eliminated' ? 'player-item--out' : ''}">
+                    <span>#${i+1} ${p.sit_out ? '💤 ' : ''}${escapeHtml(p.username)}</span>
+                    <span class="badge ${p.status === 'eliminated' ? 'badge--out' : 'badge--open'}">${p.status}</span>
+                </div>`).join('')
+            : '<div class="empty-state">Aucun classement</div>';
+
+        // ── Timeline avec placeholders pour clocks ────────────────────────────
         const infoHtml = `
             <div class="tournament-description">
-                ${tournament.description ? escapeHtml(tournament.description) : 'No description provided'}
+                ${t.description ? escapeHtml(t.description) : '<em>Pas de description</em>'}
             </div>
-            
-            <div class="tournament-timeline">
-                <div class="timeline-item">
-                    <span class="timeline-icon">📅</span>
-                    <div class="timeline-content">
-                        <strong>Registration opens</strong>
-                        <div>${formatDate(tournament.registration_start)}</div>
+            <div class="timeline">
+                <div class="timeline__item">
+                    <span class="timeline__icon">📅</span>
+                    <div><strong>Inscriptions ouvrent</strong><br>${formatDate(t.registration_start)}</div>
+                </div>
+                <div class="timeline__item">
+                    <span class="timeline__icon">⏰</span>
+                    <div>
+                        <strong>Inscriptions ferment</strong><br>${formatDate(t.registration_end)}
+                        <span class="clock-inline" id="modal-regEnd-clock"></span>
                     </div>
                 </div>
-                <div class="timeline-item">
-                    <span class="timeline-icon">⏰</span>
-                    <div class="timeline-content">
-                        <strong>Registration closes</strong>
-                        <div>${formatDate(tournament.registration_end)}</div>
-                        ${tournament.time_until_registration_end ? 
-                            `<span class="time-remaining">(${formatTime(tournament.time_until_registration_end)} remaining)</span>` : ''}
+                <div class="timeline__item">
+                    <span class="timeline__icon">🎯</span>
+                    <div>
+                        <strong>Départ</strong><br>${formatDate(t.start_time)}
+                        <span class="clock-inline" id="modal-start-clock"></span>
                     </div>
                 </div>
-                <div class="timeline-item">
-                    <span class="timeline-icon">🎯</span>
-                    <div class="timeline-content">
-                        <strong>Tournament starts</strong>
-                        <div>${formatDate(tournament.start_time)}</div>
-                        ${tournament.time_until_start ? 
-                            `<span class="time-remaining">(${formatTime(tournament.time_until_start)} remaining)</span>` : ''}
+                ${t.status === 'in_progress' ? `
+                <div class="timeline__item timeline__item--highlight">
+                    <span class="timeline__icon">🎲</span>
+                    <div>
+                        <strong>Niveau actuel : ${currentLvl}
+                            — Blinds ${t.current_blinds?.small_blind}/${t.current_blinds?.big_blind}</strong>
+                        <br>Prochain niveau : <span class="clock-inline" id="modal-blind-clock">—</span>
                     </div>
-                </div>
+                </div>` : ''}
             </div>
-            
-            <div class="tournament-stats-grid">
-                <div class="stat-card">
-                    <div class="stat-value">${tournament.players_count}/${tournament.max_players}</div>
-                    <div class="stat-label">Players</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value">💰 ${tournament.prize_pool.toLocaleString()}</div>
-                    <div class="stat-label">Prize Pool</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value">${tournament.itm_percentage}%</div>
-                    <div class="stat-label">ITM</div>
-                </div>
-                ${tournament.current_blinds ? `
-                <div class="stat-card">
-                    <div class="stat-value">${tournament.current_blinds.small_blind}/${tournament.current_blinds.big_blind}</div>
-                    <div class="stat-label">Current Blinds</div>
-                </div>
-                ` : ''}
+            <div class="stats-row">
+                <div class="stat-mini"><div class="stat-mini__val">${t.players_count}/${t.max_players}</div><div class="stat-mini__lbl">Joueurs</div></div>
+                <div class="stat-mini"><div class="stat-mini__val">💰 ${Number(t.prize_pool).toLocaleString()}</div><div class="stat-mini__lbl">Prize Pool</div></div>
+                <div class="stat-mini"><div class="stat-mini__val">${t.itm_percentage}%</div><div class="stat-mini__lbl">ITM</div></div>
             </div>
         `;
-        
-        // Onglets
+
+        // ── Onglets ───────────────────────────────────────────────────────────
+        const tabs = [
+            { id: 'info',    icon: '📋', label: 'Infos',   html: infoHtml   },
+            { id: 'prizes',  icon: '🏆', label: 'Prix',    html: `<div class="prize-structure"><h4>Répartition</h4><div class="prize-list">${prizesHtml}</div></div>` },
+            { id: 'blinds',  icon: '🎲', label: 'Blinds',  html: `<div class="blind-structure"><h4>Niveaux</h4><div class="blind-list">${blindsHtml}</div></div>` },
+            { id: 'players', icon: '👥', label: 'Joueurs', html: `<div class="registered-players"><h4>Inscrits (${t.players_count})</h4><div class="players-list">${playersHtml}</div></div>` },
+            ...(t.status === 'in_progress' ? [{ id: 'ranking', icon: '📊', label: 'Classement', html: `<div class="ranking"><h4>Classement en direct</h4><div class="players-list">${rankingHtml}</div></div>` }] : []),
+        ];
+
         const tabsHtml = `
-            <div class="tournament-tabs">
-                <button class="tab-btn active" data-tab="info">📋 Information</button>
-                <button class="tab-btn" data-tab="prizes">🏆 Prize Structure</button>
-                <button class="tab-btn" data-tab="blind">🎲 Blind Structure</button>
-                <button class="tab-btn" data-tab="players">👥 Registered Players</button>
+            <div class="tab-nav">${tabs.map((tab, i) => `
+                <button class="tab-nav__btn ${i === 0 ? 'tab-nav__btn--active' : ''}"
+                    data-tab="${tab.id}">${tab.icon} ${tab.label}</button>`).join('')}
             </div>
-            
-            <div class="tournament-tab-content active" id="tab-info">
-                ${infoHtml}
-            </div>
-            <div class="tournament-tab-content" id="tab-prizes">
-                <div class="prize-structure">
-                    <h4>Prize Distribution</h4>
-                    <div class="prize-list">${prizesHtml}</div>
-                </div>
-            </div>
-            <div class="tournament-tab-content" id="tab-blind">
-                <div class="blind-structure">
-                    <h4>Blind Levels</h4>
-                    <div class="blind-structure-list">${blindsHtml}</div>
-                </div>
-            </div>
-            <div class="tournament-tab-content" id="tab-players">
-                <div class="registered-players">
-                    <h4>Registered Players (${tournament.players_count})</h4>
-                    <div class="players-list">${playersHtml}</div>
-                </div>
-            </div>
+            ${tabs.map((tab, i) => `
+                <div class="tab-pane ${i === 0 ? 'tab-pane--active' : ''}" id="tp-${tab.id}">
+                    ${tab.html}
+                </div>`).join('')}
         `;
-        
-        // Bouton d'action
-        let actionButton = '';
-        const now = new Date();
-        const regStart = new Date(tournament.registration_start);
-        const regEnd = new Date(tournament.registration_end);
-        
-        if (tournament.status === 'registration') {
-            if (now >= regStart && now < regEnd) {
-                if (!isRegistered) {
-                    actionButton = `<button class="register-tournament-btn" onclick="window.registerForTournament('${tournamentId}')">✅ Register Now</button>`;
-                } else {
-                    actionButton = `<button class="unregister-tournament-btn" onclick="window.unregisterFromTournament('${tournamentId}')">❌ Cancel Registration</button>`;
-                }
-            } else if (now < regStart) {
-                actionButton = `<div class="status-message">⏰ Registration opens ${formatDate(tournament.registration_start)}</div>`;
-            } else {
-                actionButton = `<div class="status-message">📝 Registration closed</div>`;
-            }
-        } else if (tournament.status === 'in_progress') {
-            actionButton = `<button class="spectate-tournament-btn" onclick="window.showTournamentTables('${tournamentId}')">👁️ View Tables & Spectate</button>`;
-        }
-        
+
+        // ── Bouton d'action ────────────────────────────────────────────────────
+        const actionHtml = _buildTournamentActionBtn(t, isRegistered);
+
+        // ── Statut badge ──────────────────────────────────────────────────────
+        const statusLabels = {
+            registration: '📝 Inscriptions',
+            starting:     '⚡ Démarrage…',
+            in_progress:  '🎲 En cours',
+            finished:     '🏁 Terminé',
+            cancelled:    '❌ Annulé',
+        };
+
         detailsDiv.innerHTML = `
-            <div class="tournament-info-header">
-                <h2>🏆 ${escapeHtml(tournament.name)}</h2>
-                <div class="tournament-status-badge status-${tournament.status}">
-                    ${tournament.status === 'registration' ? '📝 Registration Open' : 
-                      tournament.status === 'in_progress' ? '🎲 In Progress' : 
-                      tournament.status === 'finished' ? '🏁 Finished' : tournament.status}
-                </div>
+            <div class="tournament-modal__header">
+                <h2>🏆 ${escapeHtml(t.name)}</h2>
+                <span class="badge status-badge--${t.status}">${statusLabels[t.status] ?? t.status}</span>
             </div>
             ${tabsHtml}
-            ${actionButton}
+            <div class="tournament-modal__action">${actionHtml}</div>
         `;
-        
-        setupTournamentTabs(modal);
-        modal.style.display = 'block';
-        
-    } catch (error) {
-        console.error('Error loading tournament details:', error);
-        alert('Failed to load tournament details');
+
+        // Activer les onglets
+        _bindTabs(detailsDiv);
+
+        modal.style.display = 'flex';
+
+        // ── Clocks modales ─────────────────────────────────────────────────────
+        const regEndSec = isoToSec(t.registration_end);
+        const startSec  = isoToSec(t.start_time);
+
+        _startClock('modal_regEnd', () => {
+            const el = document.getElementById('modal-regEnd-clock');
+            if (!el) { _clearClock('modal_regEnd'); return; }
+            const d = regEndSec - nowUTC();
+            el.textContent = d > 0 ? `(ferme dans ${formatCountdown(d)})` : '(fermées)';
+            el.style.color = d < 300 ? 'var(--color-danger)' : 'var(--color-ok)';
+        });
+
+        _startClock('modal_start', () => {
+            const el = document.getElementById('modal-start-clock');
+            if (!el) { _clearClock('modal_start'); return; }
+            const d = startSec - nowUTC();
+            el.textContent = d > 0 ? `(dans ${formatCountdown(d)})` : '(démarré)';
+            el.style.color = d < 60 ? 'var(--color-danger)' : d < 300 ? 'var(--color-warn)' : 'var(--color-ok)';
+        });
+
+        if (t.status === 'in_progress') {
+            let blindSecs = t.seconds_until_next_level ?? null;
+            _startClock('modal_blind', () => {
+                const el = document.getElementById('modal-blind-clock');
+                if (!el) { _clearClock('modal_blind'); return; }
+                if (blindSecs === null) { el.textContent = '—'; return; }
+                el.textContent = formatCountdown(blindSecs, true);
+                el.style.color = blindSecs <= 30 ? 'var(--color-danger)' : blindSecs <= 60 ? 'var(--color-warn)' : 'var(--color-ok)';
+                blindSecs = Math.max(0, blindSecs - 1);
+            });
+        }
+
+    } catch (e) {
+        console.error('showTournamentDetails:', e);
+        showToast('Impossible de charger le tournoi', 'error');
     }
 };
 
-// Fonction pour gérer les onglets
-function setupTournamentTabs(modal) {
-    const tabs = modal.querySelectorAll('.tournament-tabs .tab-btn');
-    const contents = modal.querySelectorAll('.tournament-tab-content');
-    
-    tabs.forEach(tab => {
-        tab.onclick = () => {
-            const tabId = tab.dataset.tab;
-            tabs.forEach(t => t.classList.remove('active'));
-            contents.forEach(c => c.classList.remove('active'));
-            tab.classList.add('active');
-            const activeContent = modal.querySelector(`#tab-${tabId}`);
-            if (activeContent) activeContent.classList.add('active');
+function _buildTournamentActionBtn(t, isRegistered) {
+    const now      = nowUTC();
+    const regStart = isoToSec(t.registration_start);
+    const regEnd   = isoToSec(t.registration_end);
+
+    if (t.status === 'registration') {
+        if (now >= regStart && now < regEnd) {
+            if (isGuest)
+                return `<button class="btn-primary" onclick="showLoginModal()">🔐 Connectez-vous pour s'inscrire</button>`;
+            return isRegistered
+                ? `<button class="btn-danger" onclick="window.unregisterFromTournament('${t.id}')">❌ Annuler l'inscription</button>`
+                : `<button class="btn-success" onclick="window.registerForTournament('${t.id}')">✅ S'inscrire</button>`;
+        }
+        if (now < regStart)
+            return `<div class="status-msg">⏰ Inscriptions le ${formatDate(t.registration_start)}</div>`;
+        return `<div class="status-msg">📝 Inscriptions fermées</div>`;
+    }
+
+    if (t.status === 'in_progress')
+        return `<button class="btn-spectate" onclick="window.showTournamentTables('${t.id}')">👁 Voir les tables / Spectate</button>`;
+
+    if (t.status === 'finished')
+        return `<div class="status-msg">🏁 Tournoi terminé</div>`;
+
+    if (t.status === 'cancelled')
+        return `<div class="status-msg">❌ Tournoi annulé</div>`;
+
+    return '';
+}
+
+function _bindTabs(container) {
+    const btns  = container.querySelectorAll('.tab-nav__btn');
+    const panes = container.querySelectorAll('.tab-pane');
+    btns.forEach(btn => {
+        btn.onclick = () => {
+            const id = btn.dataset.tab;
+            btns.forEach(b  => b.classList.toggle('tab-nav__btn--active',  b.dataset.tab === id));
+            panes.forEach(p => p.classList.toggle('tab-pane--active', p.id === `tp-${id}`));
+            SoundManager.play('tick');
         };
     });
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// 8. Actions tournoi
+// ═════════════════════════════════════════════════════════════════════════════
+
+window.registerForTournament = async function(tournamentId) {
+    if (!currentUser || isGuest) { showLoginModal(); return; }
+    try {
+        const res = await fetch(`/api/tournaments/${tournamentId}/register`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ user_id: currentUser.id }),
+        });
+        if (res.ok) {
+            SoundManager.play('register');
+            showToast('Inscription réussie !', 'success');
+            closeModal('tournamentModal');
+            await loadTournaments();
+        } else {
+            const err = await res.json().catch(() => ({}));
+            showToast(err.detail || 'Inscription échouée', 'error');
+        }
+    } catch (_) { showToast('Erreur réseau', 'error'); }
+};
+
+window.unregisterFromTournament = async function(tournamentId) {
+    if (!confirm('Annuler votre inscription ?')) return;
+    try {
+        const res = await fetch(`/api/tournaments/${tournamentId}/unregister`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        });
+        if (res.ok) {
+            showToast('Inscription annulée', 'info');
+            closeModal('tournamentModal');
+            await loadTournaments();
+        } else {
+            showToast('Désinscription impossible', 'error');
+        }
+    } catch (_) { showToast('Erreur réseau', 'error'); }
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 9. Tables de spectating
+// ═════════════════════════════════════════════════════════════════════════════
 
 window.showTournamentTables = async function(tournamentId) {
     try {
-        const response = await fetch(`/api/tournaments/${tournamentId}/tables`);
-        if (!response.ok) throw new Error('Failed to load tables');
-        const tables = await response.json();
-        
-        const modal = document.getElementById('tournamentTablesModal');
+        const res = await fetch(`/api/tournaments/${tournamentId}/tables`);
+        if (!res.ok) throw new Error('API error');
+        const tables = await res.json();
+
+        const modal   = document.getElementById('tournamentTablesModal');
         const listDiv = document.getElementById('tournamentTablesList');
-        
-        if (!tables || tables.length === 0) {
-            listDiv.innerHTML = '<div class="loading">No tables available yet</div>';
-        } else {
-            listDiv.innerHTML = tables.map(table => `
+        if (!modal || !listDiv) return;
+
+        listDiv.innerHTML = tables.length
+            ? tables.map(tb => `
                 <div class="table-item">
-                    <div class="table-info">
-                        <strong>🎲 ${escapeHtml(table.name)}</strong>
-                        <small>${table.current_players}/${table.max_players} players</small>
+                    <div>
+                        <strong>🎲 ${escapeHtml(tb.name)}</strong>
+                        <small>${tb.current_players}/${tb.max_players} joueurs</small>
                     </div>
-                    <button class="watch-table-btn" onclick="window.watchTable('${table.id}')">👁️ Watch</button>
-                </div>
-            `).join('');
-        }
-        
-        modal.style.display = 'block';
-    } catch (error) {
-        console.error('Error loading tournament tables:', error);
-        alert('Failed to load tables');
-    }
+                    <button class="btn-spectate btn-sm"
+                        onclick="window.watchTable('${tb.id}')">👁 Regarder</button>
+                </div>`).join('')
+            : '<div class="empty-state">Aucune table disponible</div>';
+
+        modal.style.display = 'flex';
+    } catch (_) { showToast('Impossible de charger les tables', 'error'); }
 };
 
 window.watchTable = function(tableId) {
     window.location.href = `/table/${tableId}?spectate=true`;
 };
 
-window.registerForTournament = async function(tournamentId) {
-    if (!currentUser || isGuest) {
-        alert('Please login or register to join a tournament');
-        showLoginModal();
-        return;
-    }
-    
-    try {
-        const response = await fetch(`/api/tournaments/${tournamentId}/register`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: currentUser.id })
-        });
-        
-        if (response.ok) {
-            alert('Successfully registered for tournament!');
-            document.getElementById('tournamentModal').style.display = 'none';
-            await loadTournaments();
-        } else {
-            const error = await response.json();
-            alert(error.detail || 'Registration failed');
-        }
-    } catch (error) {
-        console.error('Error registering for tournament:', error);
-        alert('Registration failed');
-    }
-};
-
-window.unregisterFromTournament = async function(tournamentId) {
-    if (!currentUser || isGuest) {
-        alert('Please login to manage your registration');
-        showLoginModal();
-        return;
-    }
-    
-    if (!confirm('Are you sure you want to cancel your registration?')) return;
-    
-    try {
-        const response = await fetch(`/api/tournaments/${tournamentId}/unregister`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        if (response.ok) {
-            alert('Successfully unregistered from tournament');
-            document.getElementById('tournamentModal').style.display = 'none';
-            await loadTournaments();
-        } else {
-            const error = await response.json();
-            alert(error.detail || 'Unregistration failed');
-        }
-    } catch (error) {
-        console.error('Error unregistering:', error);
-        alert('Unregistration failed');
-    }
-};
-
-function getOrdinal(n) {
-    const s = ['th', 'st', 'nd', 'rd'];
-    const v = n % 100;
-    return s[(v - 20) % 10] || s[v] || s[0];
-}
+// ═════════════════════════════════════════════════════════════════════════════
+// 10. Chat WebSocket
+// ═════════════════════════════════════════════════════════════════════════════
 
 function initChat() {
     if (!currentUser || isGuest) return;
-    
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/chat`;
-    
-    chatWs = new WebSocket(wsUrl);
-    
+
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    chatWs = new WebSocket(`${protocol}//${location.host}/ws/chat`);
+
     chatWs.onopen = () => {
-        console.log('Chat connected');
         chatWs.send(JSON.stringify({ type: 'join', user_id: currentUser.id, username: currentUser.username }));
-        document.getElementById('chatInput').disabled = false;
-        document.getElementById('chatSendBtn').disabled = false;
+        _q('chatInput',   el => el.disabled = false);
+        _q('chatSendBtn', el => el.disabled = false);
     };
-    
-    chatWs.onmessage = (event) => {
-        const message = JSON.parse(event.data);
-        addChatMessage(message);
-        if (message.user_count) {
-            document.getElementById('chatUserCount').textContent = `${message.user_count} online`;
-        }
+
+    chatWs.onmessage = ({ data }) => {
+        try {
+            const msg = JSON.parse(data);
+            _addChatMessage(msg);
+            if (msg.user_count) _q('chatUserCount', el => el.textContent = `${msg.user_count} en ligne`);
+            if (msg.type === 'message' && SettingsManager.get('chatNotifications') !== 'off') {
+                SoundManager.play('chat');
+            }
+        } catch (_) {}
     };
-    
+
     chatWs.onclose = () => {
-        console.log('Chat disconnected');
-        document.getElementById('chatInput').disabled = true;
-        document.getElementById('chatSendBtn').disabled = true;
-        setTimeout(initChat, 3000);
+        _q('chatInput',   el => el.disabled = true);
+        _q('chatSendBtn', el => el.disabled = true);
+        setTimeout(initChat, 4000); // reconnexion automatique
     };
-    
-    const chatInput = document.getElementById('chatInput');
-    const chatSendBtn = document.getElementById('chatSendBtn');
-    
-    chatSendBtn.onclick = () => sendChatMessage();
-    chatInput.onkeypress = (e) => { if (e.key === 'Enter') sendChatMessage(); };
+
+    chatWs.onerror = () => chatWs.close();
+
+    _q('chatSendBtn', el => { el.onclick = sendChatMessage; });
+    _q('chatInput',   el => { el.onkeypress = e => { if (e.key === 'Enter') sendChatMessage(); }; });
 }
 
 function sendChatMessage() {
     const input = document.getElementById('chatInput');
-    const message = input.value.trim();
-    if (!message) return;
-    
-    if (chatWs && chatWs.readyState === WebSocket.OPEN) {
-        chatWs.send(JSON.stringify({ type: 'message', username: currentUser.username, message: message }));
-        input.value = '';
+    if (!input) return;
+    const text = input.value.trim();
+    if (!text || !chatWs || chatWs.readyState !== WebSocket.OPEN) return;
+    chatWs.send(JSON.stringify({ type: 'message', text, user_id: currentUser.id, username: currentUser.username }));
+    input.value = '';
+}
+
+function _addChatMessage(msg) {
+    const box = document.getElementById('chatMessages');
+    if (!box) return;
+
+    const el = document.createElement('div');
+    el.className = `chat-msg chat-msg--${msg.type || 'message'}`;
+    el.innerHTML = msg.type === 'system'
+        ? `<em>${escapeHtml(msg.message)}</em>`
+        : `<strong>${escapeHtml(msg.username)}:</strong> ${escapeHtml(msg.text || msg.message)}`;
+
+    box.appendChild(el);
+
+    // Garder max 200 messages
+    while (box.children.length > 200) box.removeChild(box.firstChild);
+    box.scrollTop = box.scrollHeight;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 11. Options / paramètres
+// ═════════════════════════════════════════════════════════════════════════════
+
+function setupOptionsModal() {
+    const modal   = document.getElementById('optionsModal');
+    const openBtn = document.getElementById('optionsBtn');
+    if (!modal) return;
+
+    if (openBtn) openBtn.onclick = () => _openOptionsModal(modal);
+
+    // Bouton Sauver
+    _q('saveSettings', el => {
+        el.onclick = () => _saveOptions(modal);
+    });
+
+    // Fermeture
+    modal.querySelector('.close')?.addEventListener('click', () => closeModal('optionsModal'));
+}
+
+function _openOptionsModal(modal) {
+    const s = SettingsManager.load();
+
+    // Sons
+    _q('soundSetting',      el => el.value   = s.sound);
+    _q('soundVolume',       el => el.value   = s.soundVolume ?? 0.5);
+
+    // Thème
+    const themeSelect = document.getElementById('themeSelect');
+    if (themeSelect) {
+        ThemeManager.populateSelect(themeSelect);
+        themeSelect.value = s.theme || 'dark';
     }
+
+    // Jeu
+    _q('animationSpeed',    el => el.value   = s.animationSpeed);
+    _q('cardDisplay',       el => el.value   = s.cardDisplay);
+    _q('autoAction',        el => el.value   = s.autoAction);
+    _q('chatNotifications', el => el.value   = s.chatNotifications);
+    _q('actionTimer',       el => el.value   = s.actionTimer);
+
+    // CSS custom
+    _q('customCss',         el => el.value   = s.customCss || '');
+    _q('customCssUrl',      el => el.value   = s.customCssUrl || '');
+
+    modal.style.display = 'flex';
 }
 
-function addChatMessage(message) {
-    const container = document.getElementById('chatMessages');
-    const time = new Date(message.timestamp).toLocaleTimeString();
-    
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `chat-message ${message.type || ''}`;
-    
-    if (message.type === 'system') {
-        messageDiv.innerHTML = `<span class="time">[${time}]</span> ${escapeHtml(message.message)}`;
-    } else {
-        messageDiv.innerHTML = `<span class="time">[${time}]</span> <span class="username">${escapeHtml(message.username)}:</span> <span class="text">${escapeHtml(message.message)}</span>`;
-    }
-    
-    container.appendChild(messageDiv);
-    messageDiv.scrollIntoView({ behavior: 'smooth' });
-    while (container.children.length > 200) container.removeChild(container.firstChild);
+function _saveOptions(modal) {
+    const s = {
+        sound:             document.getElementById('soundSetting')?.value      || 'on',
+        soundVolume:       parseFloat(document.getElementById('soundVolume')?.value || 0.5),
+        theme:             document.getElementById('themeSelect')?.value       || 'dark',
+        animationSpeed:    document.getElementById('animationSpeed')?.value    || 'normal',
+        cardDisplay:       document.getElementById('cardDisplay')?.value       || 'standard',
+        autoAction:        document.getElementById('autoAction')?.value        || 'never',
+        chatNotifications: document.getElementById('chatNotifications')?.value || 'on',
+        actionTimer:       parseInt(document.getElementById('actionTimer')?.value || 30),
+        customCss:         document.getElementById('customCss')?.value         || '',
+        customCssUrl:      document.getElementById('customCssUrl')?.value      || '',
+    };
+
+    SettingsManager.save(s);
+
+    // Appliquer immédiatement
+    SoundManager.setEnabled(s.sound !== 'off');
+    SoundManager.setVolume(s.soundVolume);
+    ThemeManager.save(s.theme, s.customCss, s.customCssUrl);
+
+    closeModal('optionsModal');
+    showToast('Paramètres sauvegardés', 'success');
 }
 
-async function updateServerTime() {
-    try {
-        const response = await fetch('/api/server/time');
-        if (response.ok) {
-            const data = await response.json();
-            const timeSpan = document.getElementById('serverTime');
-            if (timeSpan) timeSpan.textContent = data.time;
-        }
-    } catch (error) {
-        console.error('Error fetching server time:', error);
-    }
+// ═════════════════════════════════════════════════════════════════════════════
+// 12. Heure serveur
+// ═════════════════════════════════════════════════════════════════════════════
+
+function _startServerClock() {
+    _startClock('serverTime', () => {
+        const now = new Date();
+        const hh  = String(now.getUTCHours()).padStart(2,'0');
+        const mm  = String(now.getUTCMinutes()).padStart(2,'0');
+        const ss  = String(now.getUTCSeconds()).padStart(2,'0');
+        _q('serverTime',      el => el.textContent = `${hh}:${mm}:${ss} UTC`);
+        _q('adminServerTime', el => el.textContent = `${hh}:${mm}:${ss} UTC`);
+    });
 }
 
-function showLoginModal() {
-    const modal = document.getElementById('loginModal');
-    if (modal) modal.style.display = 'block';
-}
-
-function showRegisterModal() {
-    const modal = document.getElementById('registerModal');
-    if (modal) modal.style.display = 'block';
-}
-
-function closeModal(modalId) {
-    const modal = document.getElementById(modalId);
-    if (modal) modal.style.display = 'none';
-}
-
-async function login(username, password, rememberMe) {
-    try {
-        const response = await fetch('/api/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password, remember_me: rememberMe })
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            currentUser = data.user;
-            isGuest = false;
-            updateUserDisplay();
-            closeModal('loginModal');
-            showToast('Login successful!', 'success');
-            await loadTournaments();
-            if (chatWs) chatWs.close();
-            initChat();
-        } else {
-            const error = await response.json();
-            alert(error.detail || 'Login failed');
-        }
-    } catch (error) {
-        console.error('Login error:', error);
-        alert('Login failed');
-    }
-}
-
-async function register(username, password, email) {
-    try {
-        const response = await fetch('/api/auth/register', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password, email: email || null })
-        });
-        
-        if (response.ok) {
-            alert('Registration successful! Please login.');
-            closeModal('registerModal');
-            showLoginModal();
-        } else {
-            const error = await response.json();
-            alert(error.detail || 'Registration failed');
-        }
-    } catch (error) {
-        console.error('Registration error:', error);
-        alert('Registration failed');
-    }
-}
-
-async function logout() {
-    try {
-        await fetch('/api/auth/logout', { method: 'POST' });
-        if (chatWs) chatWs.close();
-        currentUser = null;
-        isGuest = true;
-        currentUser = { username: 'Guest', id: null, avatar: null };
-        updateUserDisplay();
-        showToast('Logged out successfully', 'info');
-        await loadTournaments();
-    } catch (error) {
-        console.error('Logout error:', error);
-    }
-}
-
-function showToast(message, type = 'info') {
-    const toast = document.getElementById('toast');
-    if (toast) {
-        toast.textContent = message;
-        toast.className = `toast ${type} show`;
-        setTimeout(() => toast.classList.remove('show'), 3000);
-    }
-}
+// ═════════════════════════════════════════════════════════════════════════════
+// 13. Event listeners & modaux auth
+// ═════════════════════════════════════════════════════════════════════════════
 
 function setupEventListeners() {
-    const optionsBtn = document.getElementById('optionsBtn');
-    const loginBtn = document.getElementById('loginBtn');
-    const registerBtn = document.getElementById('registerBtn');
-    const logoutBtn = document.getElementById('logoutBtn');
-    const adminBtn = document.getElementById('adminBtn');
-    
-    if (optionsBtn) optionsBtn.onclick = () => showOptionsModal();
-    if (loginBtn) loginBtn.onclick = () => showLoginModal();
-    if (registerBtn) registerBtn.onclick = () => showRegisterModal();
-    if (logoutBtn) logoutBtn.onclick = () => logout();
-    if (adminBtn) adminBtn.onclick = () => window.location.href = '/admin';
+    _qEv('optionsBtn',   'click', () => document.getElementById('optionsModal') && _openOptionsModal(document.getElementById('optionsModal')));
+    _qEv('loginBtn',     'click', showLoginModal);
+    _qEv('registerBtn',  'click', showRegisterModal);
+    _qEv('logoutBtn',    'click', logout);
+    _qEv('adminBtn',     'click', () => window.location.href = '/admin');
+    _qEv('profileLink',  'click', e => { e.preventDefault(); window.location.href = '/profile'; });
+}
+
+function _qEv(id, event, fn) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener(event, fn);
+}
+
+function showLoginModal()    { _showModal('loginModal'); }
+function showRegisterModal() { _showModal('registerModal'); }
+
+function _showModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'flex';
 }
 
 function setupAuthModals() {
+    // Login form
     const loginForm = document.getElementById('loginForm');
     if (loginForm) {
-        loginForm.onsubmit = (e) => {
+        loginForm.onsubmit = e => {
             e.preventDefault();
-            const username = document.getElementById('loginUsername')?.value;
-            const password = document.getElementById('loginPassword')?.value;
-            const rememberMe = document.getElementById('rememberMe')?.checked;
-            if (username && password) login(username, password, rememberMe);
+            const user = document.getElementById('loginUsername')?.value;
+            const pass = document.getElementById('loginPassword')?.value;
+            const rem  = document.getElementById('rememberMe')?.checked ?? false;
+            if (user && pass) login(user, pass, rem);
         };
     }
-    
-    const registerForm = document.getElementById('registerForm');
-    if (registerForm) {
-        registerForm.onsubmit = (e) => {
+
+    // Register form
+    const regForm = document.getElementById('registerForm');
+    if (regForm) {
+        regForm.onsubmit = e => {
             e.preventDefault();
-            const username = document.getElementById('regUsername')?.value;
-            const password = document.getElementById('regPassword')?.value;
+            const user  = document.getElementById('regUsername')?.value;
+            const pass  = document.getElementById('regPassword')?.value;
             const email = document.getElementById('regEmail')?.value;
-            if (username && password) register(username, password, email);
+            if (user && pass) register(user, pass, email);
         };
     }
-    
-    document.querySelectorAll('.modal .close').forEach(closeBtn => {
-        closeBtn.onclick = () => {
-            const modal = closeBtn.closest('.modal');
-            if (modal) modal.style.display = 'none';
+
+    // Fermeture génériques
+    document.querySelectorAll('.modal .close').forEach(btn => {
+        btn.onclick = () => {
+            const m = btn.closest('.modal');
+            if (m) {
+                m.style.display = 'none';
+                // Stopper les clocks modales si c'est le modal tournoi
+                if (m.id === 'tournamentModal') _clearClocksBy('modal_');
+            }
         };
     });
-    
-    window.onclick = (event) => {
-        if (event.target.classList.contains('modal')) {
-            event.target.style.display = 'none';
+
+    // Clic hors modal
+    window.addEventListener('click', e => {
+        if (e.target?.classList?.contains('modal')) {
+            e.target.style.display = 'none';
+            if (e.target.id === 'tournamentModal') _clearClocksBy('modal_');
         }
-    };
+    });
 }
 
-function showOptionsModal() {
-    const modal = document.getElementById('optionsModal');
-    if (!modal) return;
-    
-    const settings = SettingsManager.load();
-    const soundSetting = document.getElementById('soundSetting');
-    const animationSpeed = document.getElementById('animationSpeed');
-    
-    if (soundSetting) soundSetting.value = settings.sound;
-    if (animationSpeed) animationSpeed.value = settings.animationSpeed;
-    
-    modal.style.display = 'block';
+// ═════════════════════════════════════════════════════════════════════════════
+// 14. Initialisation
+// ═════════════════════════════════════════════════════════════════════════════
+
+async function init() {
+    // Charger thème et sons en premier (avant tout rendu)
+    ThemeManager.load();
+    SoundManager.init();
+
+    await checkAuth();
+    await loadTournaments();
+
+    // Rafraîchissement auto des tournois
+    if (_refreshInterval) clearInterval(_refreshInterval);
+    _refreshInterval = setInterval(loadTournaments, 10_000);
+
+    setupEventListeners();
+    setupAuthModals();
+    setupOptionsModal();
+    _startServerClock();
+
+    // Chat uniquement si connecté
+    if (!isGuest) initChat();
 }
 
-function setupOptionsModal() {
-    const optionsModal = document.getElementById('optionsModal');
-    const closeBtn = optionsModal?.querySelector('.close');
-    const saveBtn = document.getElementById('saveSettings');
-    
-    if (closeBtn) closeBtn.onclick = () => optionsModal.style.display = 'none';
-    
-    if (saveBtn) {
-        saveBtn.onclick = () => {
-            SettingsManager.save({
-                sound: document.getElementById('soundSetting')?.value || 'on',
-                animationSpeed: document.getElementById('animationSpeed')?.value || 'normal'
-            });
-            optionsModal.style.display = 'none';
-            showToast('Settings saved!', 'success');
-        };
-    }
-}
-
-class SettingsManager {
-    static defaults = { sound: 'on', animationSpeed: 'normal' };
-    
-    static load() {
-        const saved = localStorage.getItem('poker_settings');
-        if (saved) {
-            try {
-                return { ...this.defaults, ...JSON.parse(saved) };
-            } catch (e) {
-                return this.defaults;
-            }
-        }
-        return this.defaults;
-    }
-    
-    static save(settings) {
-        localStorage.setItem('poker_settings', JSON.stringify(settings));
-    }
-}
-
-window.settings = SettingsManager;
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
+// ── Démarrage ─────────────────────────────────────────────────────────────────
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
 } else {

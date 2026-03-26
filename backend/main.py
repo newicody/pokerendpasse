@@ -75,9 +75,11 @@ if FRONTEND_DIR.exists():
     app.mount("/uploads", StaticFiles(directory=str(Path("frontend/assets/uploads"))), name="uploads")
 
 # Instances
-lobby = Lobby()
-tournament_manager = TournamentManager(data_dir="data", lobby=lobby)
-ws_manager = WebSocketManager()
+lobby              = Lobby()
+ws_manager         = WebSocketManager()
+tournament_manager = lobby.tournament_manager   # ← réutiliser celui du lobby
+tournament_manager.set_ws_manager(ws_manager)
+lobby._ws_manager  = ws_manager
 
 def read_html_file(filepath: Path) -> str:
     try:
@@ -149,6 +151,14 @@ async def startup_event():
                     logger.info(f"Deleted old avatar: {file.name}")
     except Exception as e:
         logger.error(f"Error cleaning avatars: {e}")
+
+@app.get("/api/server/time")
+async def server_time():
+    now = datetime.utcnow()
+    return json_response({
+        "time": now.strftime("%H:%M:%S"),
+        "iso": now.isoformat()
+    })
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -379,7 +389,8 @@ async def get_tournament(tournament_id: str):
     tournament = tournament_manager.tournaments.get(tournament_id)
     if not tournament:
         raise HTTPException(status_code=404, detail="Tournament not found")
-    return json_response(tournament.to_dict())
+    #return json_response(tournament.to_dict())
+    return json_response(tournament_manager.get_tournament_info_extended(t))
 
 @app.get("/api/tournaments/{tournament_id}/registered/{user_id}")
 async def check_tournament_registration(tournament_id: str, user_id: str):
