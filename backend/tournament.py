@@ -705,12 +705,12 @@ class TournamentManager:
             end_idx   = min(start_idx + players_per_table, len(registered))
 
             for i, player in enumerate(registered[start_idx:end_idx]):
-                from .models import JoinTableRequest
-                await self.lobby.join_table(player['user_id'], table.id)
+                starting_chips = player.get('chips', 10000)
+                await self.lobby.join_table(player['user_id'], table.id, chips=starting_chips)
                 player['table_id'] = table.id
                 player['position'] = i
-                player['status']   = 'registered'  # reste 'registered' tant qu'en jeu
-
+                player['status'] = 'registered'
+                
         self.save_tournament(tournament)
         logger.info(f"{num_tables} tables créées pour {tournament.name}")
 

@@ -353,25 +353,76 @@ class PokerTable:
         amt = min(amount, ps.chips)
         ps.chips -= amt; ps.current_bet = amt; ps.total_bet += amt; self._pot += amt
 
-    async def _bet_fallback(self, active: List[PlayerState]):
+    async def _bet_fallback(self, active):
+        """Tour d'enchères — auto-fold les absents après timeout."""
+        acted = set()
+        max_rounds = len(active) * 2  # sécurité anti-boucle infinie
+        rounds = 0
+ 
+        while rounds < max_rounds:
+            rounds += 1
+            all_acted = True
+ 
+            for ps in active:
+                if ps.status != PlayerStatus.ACTIVE or ps.chips <= 0:
+                    continue
+                if ps.user_id in acted:
+                    continue
+ 
+                all_acted = False
+ 
+                # Mettre à jour l'état pour le frontend
+                if self.game_state:
+                    idx = next((i for i, p in enumerate(active) if p.user_id == ps.user_id), 0)
+                    self.game_state.current_player_index = idx
+ 
+                # Attendre une action (timeout = auto-fold / auto-check)
+                timeout = 20  # secondes
+                try:
+                    req = await asyncio.wait_for(self._action_queue.get(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    # Joueur absent — auto-check si possible, sinon auto-fold
+                    to_call = self._current_bet - ps.current_bet
+                    if to_call <= 0:
+                        logger.info(f"[{self.name}] {ps.username} auto-check (absent)")
+                        acted.add(ps.user_id)
+                    else:
+                        ps.status = PlayerStatus.FOLDED
+                        logger.info(f"[{self.name}] {ps.username} auto-fold (absent, devait {to_call})")
+                    continue
+ 
+                # Traiter l'action reçue
+                to_call = self._current_bet - ps.current_bet
+ 
+                if req.action == ActionType.FOLD:
+                    ps.status = PlayerStatus.FOLDED
+                elif req.action in (ActionType.CALL, ActionType.CHECK):
+                    amt = min(to_call, ps.chips)
+                    ps.chips -= amt
+                    ps.current_bet += amt
+                    self._pot += amt
+                elif req.action in (ActionType.RAISE, ActionType.ALL_IN):
+                    total = self._current_bet + max(req.amount, self.big_blind)
+                    amt = min(total - ps.current_bet, ps.chips)
+                    ps.chips -= amt
+                    ps.current_bet += amt
+                    self._pot += amt
+                    self._current_bet = ps.current_bet
+                    # Un raise rouvre les enchères
+                    acted.clear()
+ 
+                acted.add(ps.user_id)
+ 
+                # Un seul joueur restant ?
+                if sum(1 for p in active if p.status == PlayerStatus.ACTIVE) <= 1:
+                    return
+ 
+            if all_acted:
+                break
+ 
+        # Reset des mises pour le prochain tour
         for ps in active:
-            if ps.status != PlayerStatus.ACTIVE or ps.chips <= 0:
-                continue
-            try:
-                req = await asyncio.wait_for(self._action_queue.get(), timeout=20)
-            except asyncio.TimeoutError:
-                ps.status = PlayerStatus.FOLDED; continue
-            to_call = self._current_bet - ps.current_bet
-            if req.action == ActionType.FOLD:
-                ps.status = PlayerStatus.FOLDED
-            elif req.action in (ActionType.CALL, ActionType.CHECK):
-                amt = min(to_call, ps.chips)
-                ps.chips -= amt; ps.current_bet += amt; self._pot += amt
-            elif req.action in (ActionType.RAISE, ActionType.ALL_IN):
-                total = self._current_bet + max(req.amount, self.big_blind)
-                amt   = min(total - ps.current_bet, ps.chips)
-                ps.chips -= amt; ps.current_bet += amt
-                self._pot += amt; self._current_bet = ps.current_bet
+            ps.current_bet = 0
 
     @staticmethod
     def _mk_deck() -> List[str]:
@@ -399,38 +450,86 @@ class PokerTable:
         )
 
     def get_state(self) -> dict:
+        """Retourne l'état complet de la table."""
         pk = self._pk_state
+ 
+        # ── Mode PokerKit ──
         if pk:
             board = [str(c) for c in pk.board_cards] if pk.board_cards else []
-            actor = None
-            if pk.actor_index is not None and pk.actor_index < len(self._position_to_uid):
-                actor = self._position_to_uid[pk.actor_index]
-            players_out = [
-                {'user_id': uid,
-                 'username': self.players[uid].username if uid in self.players else uid,
-                 'stack':    pk.stacks[i] if i < len(pk.stacks) else 0,
-                 'bet':      pk.bets[i]   if i < len(pk.bets)   else 0,
-                 'folded':   not pk.statuses[i] if i < len(pk.statuses) else True,
-                 'is_actor': pk.actor_index == i}
-                for i, uid in enumerate(self._position_to_uid)
-            ]
-            return {'status': 'in_progress', 'total_pot': pk.total_pot_amount,
-                    'board': board, 'players': players_out,
-                    'actor': actor, 'street': self._street}
-
-        if not self.game_state:
-            return {'status': 'waiting'}
-        status_val = (self.game_state.status.value
-                      if hasattr(self.game_state.status, 'value')
-                      else self.game_state.status)
+            players_out = []
+            for i, uid in enumerate(self._position_to_uid):
+                ps = self.players.get(uid)
+                players_out.append({
+                    'user_id':     uid,
+                    'username':    ps.username if ps else uid,
+                    'avatar':      ps.avatar if ps else None,
+                    'chips':       pk.stacks[i] if i < len(pk.stacks) else 0,
+                    'stack':       pk.stacks[i] if i < len(pk.stacks) else 0,
+                    'position':    ps.position if ps else i,
+                    'status':      'active' if (i < len(pk.statuses) and pk.statuses[i]) else 'folded',
+                    'current_bet': pk.bets[i] if i < len(pk.bets) else 0,
+                    'bet':         pk.bets[i] if i < len(pk.bets) else 0,
+                    'hole_cards':  [str(c) for c in (pk.hole_cards[i] or [])] if i < len(pk.hole_cards) else [],
+                    'is_dealer':   ps.is_dealer if ps else False,
+                    'is_small_blind': ps.is_small_blind if ps else False,
+                    'is_big_blind':   ps.is_big_blind if ps else False,
+                    'total_bet':   ps.total_bet if ps else 0,
+                })
+            return {
+                'table_id':             self.id,
+                'table_name':           self.name,
+                'status':               'in_progress',
+                'round':                self.game_state.round if self.game_state else 0,
+                'pot':                  sum(pk.pots) if pk.pots else 0,
+                'community_cards':      board,
+                'current_bet':          max(pk.bets) if pk.bets else 0,
+                'current_player_index': pk.actor_index if pk.actor_index is not None else 0,
+                'dealer_index':         0,
+                'players':              players_out,
+                'min_raise':            self.big_blind,
+                'max_players':          self.max_players,
+                'small_blind':          self.small_blind,
+                'big_blind':            self.big_blind,
+                'betting_round':        getattr(self, '_street', 'preflop'),
+            }
+ 
+        # ── Mode fallback ──
+        players_data = []
+        for ps in self.players.values():
+            players_data.append({
+                'user_id':        ps.user_id,
+                'username':       ps.username,
+                'avatar':         ps.avatar,
+                'chips':          ps.chips,
+                'stack':          ps.chips,
+                'position':       ps.position,
+                'status':         ps.status.value if hasattr(ps.status, 'value') else str(ps.status),
+                'current_bet':    ps.current_bet,
+                'bet':            ps.current_bet,
+                'total_bet':      ps.total_bet,
+                'hole_cards':     ps.hole_cards,
+                'is_dealer':      ps.is_dealer,
+                'is_small_blind': ps.is_small_blind,
+                'is_big_blind':   ps.is_big_blind,
+            })
+ 
+        gs = self.game_state
         return {
-            'status': status_val, 'total_pot': self._pot,
-            'community_cards': self.game_state.community_cards,
-            'current_bet': self._current_bet, 'street': self._street,
-            'players': [{'user_id': ps.user_id, 'username': ps.username,
-                          'stack': ps.chips, 'bet': ps.current_bet,
-                          'folded': ps.status == PlayerStatus.FOLDED}
-                         for ps in self.players.values()],
+            'table_id':             self.id,
+            'table_name':           self.name,
+            'status':               gs.status.value if gs and hasattr(gs.status, 'value') else (gs.status if gs else 'waiting'),
+            'round':                gs.round if gs else 0,
+            'pot':                  self._pot,
+            'community_cards':      list(self._community),
+            'current_bet':          self._current_bet,
+            'current_player_index': gs.current_player_index if gs else 0,
+            'dealer_index':         gs.dealer_index if gs else 0,
+            'players':              players_data,
+            'min_raise':            self.big_blind,
+            'max_players':          self.max_players,
+            'small_blind':          self.small_blind,
+            'big_blind':            self.big_blind,
+            'betting_round':        getattr(self, '_street', 'preflop'),
         }
 
     def get_valid_actions(self, user_id: str) -> dict:

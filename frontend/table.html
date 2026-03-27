@@ -8,10 +8,12 @@
     <link rel="stylesheet" href="/css/table.css">
 </head>
 <body>
+    <!-- Tournament info bar (top) -->
+    <div id="tournamentInfo" class="tournament-info-bar"></div>
+
     <div class="poker-room">
         <div class="table-container">
             <div class="poker-table">
-                <!-- Community cards -->
                 <div class="community-cards" id="communityCards">
                     <div id="flop1" class="card back"></div>
                     <div id="flop2" class="card back"></div>
@@ -19,22 +21,15 @@
                     <div id="turn" class="card back"></div>
                     <div id="river" class="card back"></div>
                 </div>
-
-                <!-- Pot -->
                 <div class="pot" id="pot">Pot: 0</div>
-
-                <!-- Players -->
                 <div class="players-container" id="playersContainer"></div>
             </div>
         </div>
 
-        <!-- Spectator banner -->
-        <div id="spectatorBanner" class="spectator-banner" style="display: none;">
-            👁️ You are in spectator mode —
-            <a href="/lobby" style="color:#ffd700">Back to Lobby</a>
+        <div id="spectatorBanner" class="spectator-banner" style="display:none">
+            👁️ Spectator — <a href="/lobby" style="color:#ffd700">Back to Lobby</a>
         </div>
 
-        <!-- Action panel (hidden for spectators) -->
         <div class="action-panel" id="actionPanel">
             <div class="action-buttons">
                 <button id="foldBtn" class="action-btn fold">Fold (F)</button>
@@ -42,58 +37,48 @@
                 <button id="callBtn" class="action-btn call" style="display:none">Call (C)</button>
                 <button id="raiseBtn" class="action-btn raise">Raise (R)</button>
             </div>
-
-            <div class="raise-slider" id="raiseSlider" style="display: none;">
+            <div class="raise-slider" id="raiseSlider" style="display:none">
                 <input type="range" id="raiseAmount" min="10" max="1000" step="10" value="100">
                 <div class="raise-controls">
                     <span id="raiseValue">100</span>
-                    <button id="confirmRaise" class="btn-small">Confirm Raise</button>
+                    <button id="confirmRaise" class="btn-small">Raise</button>
                     <button id="cancelRaise" class="btn-small cancel">Cancel</button>
                 </div>
             </div>
-
             <div class="player-info">
+                <div id="actionTimer" class="action-timer-display"></div>
                 <div id="playerChips">0 chips</div>
                 <div id="playerBet">Bet: 0</div>
             </div>
         </div>
 
-        <!-- Info panel -->
+        <!-- Right panel: info + chat -->
         <div class="info-panel">
             <div class="game-info">
-                <div class="info-row">
-                    <span class="label">Table:</span>
-                    <span id="tableName" class="value">Loading...</span>
-                </div>
-                <div class="info-row">
-                    <span class="label">Status:</span>
-                    <span id="gameStatus" class="value">Waiting</span>
-                </div>
-                <div class="info-row">
-                    <span class="label">Round:</span>
-                    <span id="gameRound" class="value">0</span>
-                </div>
-                <div class="info-row">
-                    <span class="label">Street:</span>
-                    <span id="bettingRound" class="value">Preflop</span>
-                </div>
+                <div class="info-row"><span class="label">Table:</span><span id="tableName" class="value">Loading...</span></div>
+                <div class="info-row"><span class="label">Status:</span><span id="gameStatus" class="value">Waiting</span></div>
+                <div class="info-row"><span class="label">Round:</span><span id="gameRound" class="value">0</span></div>
+                <div class="info-row"><span class="label">Street:</span><span id="bettingRound" class="value">Preflop</span></div>
+                <div class="info-row"><span class="label">Blinds:</span><span id="gameBlinds" class="value">?/?</span></div>
+                <div class="info-row"><span class="label">Players:</span><span id="playersAlive" class="value">0</span></div>
             </div>
 
-            <div class="hand-history">
-                <h3>Hand History</h3>
-                <div class="history-list" id="handHistory">
-                    <div class="history-entry"><span class="time">--:--</span> Waiting for game to start...</div>
+            <!-- Table Chat -->
+            <div class="table-chat">
+                <h3>💬 Table Chat</h3>
+                <div class="tchat-messages" id="tableChatMessages">
+                    <div class="tchat-msg tchat-system">Game chat active</div>
+                </div>
+                <div class="tchat-input">
+                    <input type="text" id="tableChatInput" placeholder="Chat..." disabled>
+                    <button id="tableChatSend" disabled>Send</button>
                 </div>
             </div>
 
             <button class="leave-btn" id="leaveTableBtn">🚪 Leave Table</button>
         </div>
     </div>
-
-    <!-- Toast notification -->
     <div id="toast" class="toast"></div>
-
-    <!-- Scripts -->
     <script src="/js/table.js"></script>
 </body>
 </html>

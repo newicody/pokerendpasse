@@ -1,20 +1,20 @@
 <?xml version='1.0' encoding='utf-8'?>
 <tournament>
-<id>tournament_6b755c9a</id>
-<n>Grand Tournament Origin</n>
-<description>lets go</description>
-<registration_start>2026-03-27T00:22:00</registration_start>
-<registration_end>2026-03-28T00:22:00</registration_end>
-<start_time>2026-03-27T00:26:00</start_time>
+<id>tournament_eb805ecc</id>
+<n>vssdv</n>
+<description>cvsdvcs</description>
+<registration_start>2026-03-27T00:55:00</registration_start>
+<registration_end>2026-03-28T00:55:00</registration_end>
+<start_time>2026-03-27T00:57:00</start_time>
 <max_players>100</max_players>
-<min_players>2</min_players>
+<min_players>4</min_players>
 <buy_in>0</buy_in>
-<prize_pool>30000</prize_pool>
+<prize_pool>0</prize_pool>
 <itm_percentage>10.0</itm_percentage>
 <status>in_progress</status>
-<current_level>8</current_level>
-<created_at>2026-03-27T03:01:06.237612</created_at>
-<level_started_at>2026-03-27T03:01:06.467127</level_started_at>
+<current_level>6</current_level>
+<created_at>2026-03-27T03:01:06.227247</created_at>
+<level_started_at>2026-03-27T03:01:06.465744</level_started_at>
 <blind_structure>
 <level>
 <level>1</level>
@@ -142,49 +142,51 @@
 <user_id>5dba6fcf-7d22-4879-b9a4-2afb592037e0</user_id>
 <username>eric</username>
 <avatar />
-<status>registered</status>
-<registered_at>2026-03-27T00:23:43.568436</registered_at>
-<eliminated_rank>0</eliminated_rank>
+<status>eliminated</status>
+<registered_at>2026-03-27T00:55:44.351910</registered_at>
+<eliminated_rank>4</eliminated_rank>
 <chips>10000</chips>
-<table_id>table_2ae53f65</table_id>
-<position>0</position>
-</player>
-<player>
-<user_id>9999076c-dc9e-4cdc-b812-577d40264b47</user_id>
-<username>eric1</username>
-<avatar />
-<status>registered</status>
-<registered_at>2026-03-27T00:24:01.256074</registered_at>
-<eliminated_rank>0</eliminated_rank>
-<chips>10000</chips>
-<table_id>table_2ae53f65</table_id>
+<table_id>table_e5dafb54</table_id>
 <position>2</position>
+<eliminated_at>2026-03-27T01:09:01.512775</eliminated_at>
 </player>
 <player>
 <user_id>5dc1ad2e-34c0-4308-991e-1f188ab66809</user_id>
 <username>eric2</username>
 <avatar />
 <status>registered</status>
-<registered_at>2026-03-27T00:24:15.672044</registered_at>
+<registered_at>2026-03-27T00:55:48.361061</registered_at>
 <eliminated_rank>0</eliminated_rank>
 <chips>10000</chips>
-<table_id>table_2ae53f65</table_id>
-<position>1</position>
+<table_id>table_e5dafb54</table_id>
+<position>3</position>
 </player>
 <player>
 <user_id>715beb7f-1518-432e-8c46-c498aef6df01</user_id>
 <username>eric3</username>
 <avatar />
+<status>eliminated</status>
+<registered_at>2026-03-27T00:55:52.483717</registered_at>
+<eliminated_rank>3</eliminated_rank>
+<chips>10000</chips>
+<table_id>table_e5dafb54</table_id>
+<position>1</position>
+<eliminated_at>2026-03-27T01:11:28.657095</eliminated_at>
+</player>
+<player>
+<user_id>9999076c-dc9e-4cdc-b812-577d40264b47</user_id>
+<username>eric1</username>
+<avatar />
 <status>registered</status>
-<registered_at>2026-03-27T00:24:27.824978</registered_at>
+<registered_at>2026-03-27T00:56:25.146967</registered_at>
 <eliminated_rank>0</eliminated_rank>
 <chips>10000</chips>
-<table_id>table_2ae53f65</table_id>
-<position>3</position>
+<table_id>table_e5dafb54</table_id>
+<position>0</position>
 </player>
 </players>
 <winners />
 <tables>
-<table>table_2ae53f65</table>
+<table>table_e5dafb54</table>
 </tables>
 </tournament>

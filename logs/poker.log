@@ -656,3 +656,55 @@
 2026-03-27 01:31:51 | INFO     | poker | [CONNECTION] disconnected: user=5dba6fcf-7d22-4879-b9a4-2afb592037e0 table=table_2ae53f65
 2026-03-27 01:31:51 | INFO     | poker | [CONNECTION] disconnected: user=715beb7f-1518-432e-8c46-c498aef6df01 table=table_2ae53f65
 2026-03-27 01:31:51 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-27 01:53:55 | INFO     | poker | ==================================================
+2026-03-27 01:53:55 | INFO     | poker | Poker Game Server Started
+2026-03-27 01:53:55 | INFO     | poker | ==================================================
+2026-03-27 01:53:55 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-27 01:57:29 | INFO     | poker | [CONNECTION] connected: user=9999076c-dc9e-4cdc-b812-577d40264b47 table=table_e5dafb54
+2026-03-27 01:58:19 | INFO     | poker | [CONNECTION] connected: user=9999076c-dc9e-4cdc-b812-577d40264b47 table=table_e5dafb54
+2026-03-27 01:58:32 | INFO     | poker | [CONNECTION] connected: user=5dc1ad2e-34c0-4308-991e-1f188ab66809 table=table_e5dafb54
+2026-03-27 02:00:12 | INFO     | poker | [CONNECTION] connected: user=715beb7f-1518-432e-8c46-c498aef6df01 table=table_e5dafb54
+2026-03-27 02:01:28 | INFO     | poker | [CONNECTION] disconnected: user=715beb7f-1518-432e-8c46-c498aef6df01 table=table_e5dafb54
+2026-03-27 02:43:21 | INFO     | poker | ==================================================
+2026-03-27 02:43:21 | INFO     | poker | Poker Game Server Started
+2026-03-27 02:43:21 | INFO     | poker | ==================================================
+2026-03-27 02:43:22 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-27 02:46:19 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-27 02:46:22 | INFO     | poker | ==================================================
+2026-03-27 02:46:22 | INFO     | poker | Poker Game Server Started
+2026-03-27 02:46:22 | INFO     | poker | ==================================================
+2026-03-27 02:46:22 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-27 03:05:30 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-27 03:05:32 | INFO     | poker | ==================================================
+2026-03-27 03:05:32 | INFO     | poker | Poker Game Server Started
+2026-03-27 03:05:32 | INFO     | poker | ==================================================
+2026-03-27 03:05:32 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-27 03:07:05 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-27 03:07:14 | INFO     | poker | ==================================================
+2026-03-27 03:07:14 | INFO     | poker | Poker Game Server Started
+2026-03-27 03:07:14 | INFO     | poker | ==================================================
+2026-03-27 03:07:14 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-27 03:09:10 | INFO     | poker | [SYSTEM] Poker game server stopped
+2026-03-27 03:10:02 | INFO     | poker | ==================================================
+2026-03-27 03:10:02 | INFO     | poker | Poker Game Server Started
+2026-03-27 03:10:02 | INFO     | poker | ==================================================
+2026-03-27 03:10:03 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-27 03:10:12 | INFO     | poker | [CONNECTION] connected: user=9999076c-dc9e-4cdc-b812-577d40264b47 table=table_e5dafb54
+2026-03-27 03:12:14 | INFO     | poker | ==================================================
+2026-03-27 03:12:14 | INFO     | poker | Poker Game Server Started
+2026-03-27 03:12:14 | INFO     | poker | ==================================================
+2026-03-27 03:12:14 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-27 03:12:47 | INFO     | poker | [CONNECTION] connected: user=9999076c-dc9e-4cdc-b812-577d40264b47 table=table_e5dafb54
+2026-03-27 04:01:05 | INFO     | poker | ==================================================
+2026-03-27 04:01:06 | INFO     | poker | Poker Game Server Started
+2026-03-27 04:01:06 | INFO     | poker | ==================================================
+2026-03-27 04:01:06 | INFO     | poker | [SYSTEM] Poker game server started
+2026-03-27 04:01:27 | INFO     | poker | [CONNECTION] connected: user=9999076c-dc9e-4cdc-b812-577d40264b47 table=table_e5dafb54
+2026-03-27 04:01:50 | INFO     | poker | [CONNECTION] disconnected: user=9999076c-dc9e-4cdc-b812-577d40264b47 table=table_e5dafb54
+2026-03-27 04:01:52 | INFO     | poker | [CONNECTION] connected: user=9999076c-dc9e-4cdc-b812-577d40264b47 table=table_2ae53f65
+2026-03-27 04:02:12 | INFO     | poker | [CONNECTION] disconnected: user=9999076c-dc9e-4cdc-b812-577d40264b47 table=table_2ae53f65
+2026-03-27 04:02:20 | INFO     | poker | [CONNECTION] connected: user=9999076c-dc9e-4cdc-b812-577d40264b47 table=table_e5dafb54
+2026-03-27 04:02:28 | INFO     | poker | [CONNECTION] disconnected: user=9999076c-dc9e-4cdc-b812-577d40264b47 table=table_e5dafb54
+2026-03-27 04:03:00 | INFO     | poker | [CONNECTION] connected: user=9999076c-dc9e-4cdc-b812-577d40264b47 table=table_e5dafb54
+2026-03-27 04:03:09 | INFO     | poker | [CONNECTION] disconnected: user=9999076c-dc9e-4cdc-b812-577d40264b47 table=table_e5dafb54
+2026-03-27 04:03:09 | INFO     | poker | [SYSTEM] Poker game server stopped

@@ -1,492 +1,55 @@
 /**
- * table.js — Page de table de poker
- * Version corrigée — spectateurs, reconnexion, actions
+ * table.js — Poker Table with timer, table chat, tournament rankings
  */
-
 'use strict';
-
-let ws = null;
-let gameState = null;
-let actionTimeout = null;
-let currentUser = null;
-let isSpectator = false;
-let reconnectTimer = null;
-let reconnectAttempts = 0;
-const MAX_RECONNECT = 10;
-
-const tableId = window.tableId;
-const tableName = window.tableName;
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Init
-// ═════════════════════════════════════════════════════════════════════════════
-
-async function init() {
-    console.log('Initializing table page...', { tableId, tableName });
-
-    // Charger l'utilisateur — compatible avec lobby.js et api.js
-    await loadCurrentUser();
-
-    const urlParams = new URLSearchParams(window.location.search);
-    isSpectator = urlParams.get('spectate') === 'true' || !currentUser;
-
-    if (isSpectator) {
-        document.getElementById('actionPanel').style.display = 'none';
-        document.getElementById('spectatorBanner').style.display = 'block';
-    }
-
-    const tableNameEl = document.getElementById('tableName');
-    if (tableNameEl) tableNameEl.textContent = tableName || 'Table';
-
-    connectWebSocket();
-    setupEventListeners();
-}
-
-async function loadCurrentUser() {
-    // D'abord essayer /api/auth/me (méthode correcte avec cookies)
-    try {
-        const response = await fetch('/api/auth/me');
-        if (response.ok) {
-            const data = await response.json();
-            if (data && data.id) {
-                currentUser = data;
-                window.currentUser = data;
-                return;
-            }
-        }
-    } catch (_) { }
-
-    // Fallback : window.initCurrentUser si disponible
-    if (typeof window.initCurrentUser === 'function') {
-        try {
-            await window.initCurrentUser();
-            currentUser = window.currentUser;
-            return;
-        } catch (_) { }
-    }
-
-    // Pas connecté
-    currentUser = null;
-    window.currentUser = null;
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// WebSocket
-// ═════════════════════════════════════════════════════════════════════════════
-
-function connectWebSocket() {
-    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-        return;
-    }
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const userId = currentUser?.id || 'spectator';
-    const wsUrl = `${protocol}//${window.location.host}/ws/${tableId}/${userId}`;
-
-    console.log('Connecting to table WS:', wsUrl);
-    ws = new WebSocket(wsUrl);
-
-    ws.onopen = () => {
-        console.log('Table WS connected');
-        reconnectAttempts = 0;
-        if (!isSpectator) {
-            showToast('Connected to table', 'success');
-        }
-    };
-
-    ws.onmessage = (event) => {
-        try {
-            const message = JSON.parse(event.data);
-            handleWebSocketMessage(message);
-        } catch (e) {
-            console.error('Error parsing WS message:', e);
-        }
-    };
-
-    ws.onclose = (event) => {
-        console.log('Table WS disconnected', event.code);
-        if (!isSpectator) {
-            showToast('Disconnected from table', 'error');
-        }
-        scheduleReconnect();
-    };
-
-    ws.onerror = (error) => {
-        console.error('Table WS error:', error);
-    };
-}
-
-function scheduleReconnect() {
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    if (reconnectAttempts >= MAX_RECONNECT) {
-        showToast('Connection lost. Please refresh the page.', 'error');
-        return;
-    }
-    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
-    reconnectAttempts++;
-    console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
-    reconnectTimer = setTimeout(connectWebSocket, delay);
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Message handling
-// ═════════════════════════════════════════════════════════════════════════════
-
-function handleWebSocketMessage(message) {
-    switch (message.type) {
-        case 'game_update':
-        case 'game_state':
-            updateGameState(message.data || message);
-            break;
-        case 'reconnected':
-            showToast('Reconnected successfully!', 'success');
-            break;
-        case 'player_connected':
-            showToast(`Player connected`, 'info');
-            break;
-        case 'player_disconnected':
-            showToast(`Player disconnected`, 'info');
-            break;
-        case 'blind_level_change':
-            showToast(`Blind Level ${message.level}: ${message.small_blind}/${message.big_blind}`, 'info');
-            break;
-        case 'player_eliminated':
-            showToast(`${message.username} eliminated (#${message.rank})`, 'info');
-            break;
-        case 'error':
-            showToast(message.message || 'Error', 'error');
-            break;
-        case 'pong':
-            break;
-        default:
-            console.log('Unknown WS message type:', message.type);
-    }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Game state rendering
-// ═════════════════════════════════════════════════════════════════════════════
-
-function updateGameState(state) {
-    gameState = state;
-    if (!state) return;
-
-    updatePot(state.pot);
-    updateCommunityCards(state.community_cards);
-    updatePlayers(state.players);
-    updateGameInfo(state);
-
-    // Actions (seulement si joueur, pas spectateur)
-    if (!isSpectator && currentUser) {
-        const myIdx = state.current_player_index;
-        const players = state.players || [];
-        const isMyTurn = players[myIdx]?.user_id === currentUser.id && state.status === 'in_progress';
-        updateActionButtons(isMyTurn, state);
-    }
-}
-
-function updatePot(pot) {
-    const potEl = document.getElementById('pot');
-    if (potEl) potEl.textContent = `Pot: ${(pot || 0).toLocaleString()}`;
-}
-
-function updateCommunityCards(cards) {
-    const cardIds = ['flop1', 'flop2', 'flop3', 'turn', 'river'];
-    cardIds.forEach((id, i) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        if (cards && cards[i]) {
-            el.className = 'card';
-            el.innerHTML = renderCard(cards[i]);
-        } else {
-            el.className = 'card back';
-            el.innerHTML = '';
-        }
-    });
-}
-
-function renderCard(cardStr) {
-    if (!cardStr || cardStr === 'back') return '';
-    // Format: "14h" = Ace of hearts, "13s" = King of spades
-    const rank = cardStr.slice(0, -1);
-    const suit = cardStr.slice(-1);
-    const suitSymbol = getSuitSymbol(suit);
-    const suitClass = getSuitClass(suit);
-    const rankDisplay = getRankDisplay(rank);
-    return `<span class="card-face ${suitClass}">${rankDisplay}${suitSymbol}</span>`;
-}
-
-function updatePlayers(players) {
-    const container = document.getElementById('playersContainer');
-    if (!container || !players) return;
-
-    container.innerHTML = '';
-
-    const positions = getPositions(players.length);
-
-    players.forEach((player, index) => {
-        const pos = positions[index] || { top: '50%', left: '50%' };
-        const isMe = player.user_id === currentUser?.id;
-        const isActive = player.status === 'active' || player.status === 'all_in';
-        const isCurrent = gameState?.players?.[gameState.current_player_index]?.user_id === player.user_id;
-
-        const playerDiv = document.createElement('div');
-        playerDiv.className = `player-seat ${isMe ? 'me' : ''} ${!isActive ? 'folded' : ''} ${isCurrent ? 'active-turn' : ''}`;
-        playerDiv.style.cssText = `position:absolute;top:${pos.top};left:${pos.left};transform:translate(-50%,-50%)`;
-
-        // Cartes (masquées pour les autres sauf si showdown)
-        let cardsHtml = '';
-        if (player.hole_cards && player.hole_cards.length > 0) {
-            cardsHtml = `<div class="player-cards">
-                ${player.hole_cards.map(c => `<div class="mini-card ${getSuitClass(c.slice(-1))}">${getRankDisplay(c.slice(0, -1))}${getSuitSymbol(c.slice(-1))}</div>`).join('')}
-            </div>`;
-        } else if (isActive && gameState?.status === 'in_progress') {
-            cardsHtml = `<div class="player-cards"><div class="mini-card back"></div><div class="mini-card back"></div></div>`;
-        }
-
-        playerDiv.innerHTML = `
-            ${cardsHtml}
-            <div class="player-info-box">
-                <div class="player-name" title="${escapeHtml(player.username)}">${escapeHtml(player.username)}</div>
-                <div class="player-chips">${(player.chips ?? 0).toLocaleString()}</div>
-            </div>
-            ${player.current_bet > 0 ? `<div class="player-bet">Bet: ${player.current_bet}</div>` : ''}
-            ${player.is_dealer ? '<div class="dealer-button-marker">D</div>' : ''}
-            ${player.is_small_blind ? '<div class="blind-marker">SB</div>' : ''}
-            ${player.is_big_blind ? '<div class="blind-marker">BB</div>' : ''}
-            ${player.status === 'all_in' ? '<div class="allin-marker">ALL IN</div>' : ''}
-        `;
-
-        container.appendChild(playerDiv);
-    });
-
-    // Update player info panel
-    if (currentUser) {
-        const me = players.find(p => p.user_id === currentUser.id);
-        if (me) {
-            const chipsEl = document.getElementById('playerChips');
-            const betEl = document.getElementById('playerBet');
-            if (chipsEl) chipsEl.textContent = `${(me.chips ?? 0).toLocaleString()} chips`;
-            if (betEl) betEl.textContent = `Bet: ${me.current_bet || 0}`;
-        }
-    }
-}
-
-function getPositions(count) {
-    // Positions circulaires autour de la table
-    const layouts = {
-        2: [{ top: '85%', left: '50%' }, { top: '15%', left: '50%' }],
-        3: [{ top: '85%', left: '50%' }, { top: '30%', left: '15%' }, { top: '30%', left: '85%' }],
-        4: [{ top: '85%', left: '50%' }, { top: '50%', left: '10%' }, { top: '15%', left: '50%' }, { top: '50%', left: '90%' }],
-        5: [{ top: '85%', left: '50%' }, { top: '65%', left: '10%' }, { top: '20%', left: '20%' }, { top: '20%', left: '80%' }, { top: '65%', left: '90%' }],
-        6: [{ top: '85%', left: '50%' }, { top: '65%', left: '10%' }, { top: '25%', left: '10%' }, { top: '15%', left: '50%' }, { top: '25%', left: '90%' }, { top: '65%', left: '90%' }],
-        7: [{ top: '85%', left: '50%' }, { top: '70%', left: '8%' }, { top: '35%', left: '8%' }, { top: '10%', left: '30%' }, { top: '10%', left: '70%' }, { top: '35%', left: '92%' }, { top: '70%', left: '92%' }],
-        8: [{ top: '85%', left: '50%' }, { top: '70%', left: '8%' }, { top: '40%', left: '5%' }, { top: '15%', left: '25%' }, { top: '15%', left: '50%' }, { top: '15%', left: '75%' }, { top: '40%', left: '95%' }, { top: '70%', left: '92%' }],
-        9: [{ top: '85%', left: '50%' }, { top: '75%', left: '8%' }, { top: '50%', left: '5%' }, { top: '25%', left: '8%' }, { top: '10%', left: '30%' }, { top: '10%', left: '70%' }, { top: '25%', left: '92%' }, { top: '50%', left: '95%' }, { top: '75%', left: '92%' }],
-    };
-    return layouts[count] || layouts[9] || [];
-}
-
-function updateGameInfo(state) {
-    const statusSpan = document.getElementById('gameStatus');
-    const roundSpan = document.getElementById('gameRound');
-    const bettingRoundSpan = document.getElementById('bettingRound');
-
-    const statusMap = {
-        'waiting': 'Waiting for players',
-        'in_progress': 'In Game',
-        'finished': 'Hand Complete',
-        'showdown': 'Showdown',
-    };
-
-    if (statusSpan) statusSpan.textContent = statusMap[state.status] || state.status || 'Unknown';
-    if (roundSpan) roundSpan.textContent = state.round || 0;
-    if (bettingRoundSpan) bettingRoundSpan.textContent = state.betting_round || 'Preflop';
-}
-
-function updateActionButtons(isMyTurn, state) {
-    const panel = document.getElementById('actionPanel');
-    const foldBtn = document.getElementById('foldBtn');
-    const checkBtn = document.getElementById('checkBtn');
-    const callBtn = document.getElementById('callBtn');
-    const raiseBtn = document.getElementById('raiseBtn');
-
-    if (!isMyTurn || state.status !== 'in_progress') {
-        if (panel) panel.style.display = 'none';
-        return;
-    }
-
-    if (panel) panel.style.display = 'flex';
-
-    const myPlayer = state.players?.find(p => p.user_id === currentUser?.id);
-    const toCall = (state.current_bet || 0) - (myPlayer?.current_bet || 0);
-
-    if (toCall <= 0) {
-        if (checkBtn) { checkBtn.style.display = 'block'; checkBtn.textContent = 'Check'; }
-        if (callBtn) callBtn.style.display = 'none';
-    } else {
-        if (checkBtn) checkBtn.style.display = 'none';
-        if (callBtn) {
-            callBtn.style.display = 'block';
-            callBtn.textContent = toCall >= (myPlayer?.chips || 0) ? `All-In ${myPlayer?.chips}` : `Call ${toCall}`;
-        }
-    }
-
-    const canRaise = (myPlayer?.chips || 0) > toCall;
-    if (raiseBtn) raiseBtn.disabled = !canRaise;
-    if (foldBtn) foldBtn.disabled = false;
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Actions
-// ═════════════════════════════════════════════════════════════════════════════
-
-function sendAction(action, amount = 0) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'action', action, amount }));
-    } else {
-        showToast('Not connected to server', 'error');
-    }
-}
-
-function setupEventListeners() {
-    const foldBtn = document.getElementById('foldBtn');
-    const checkBtn = document.getElementById('checkBtn');
-    const callBtn = document.getElementById('callBtn');
-    const raiseBtn = document.getElementById('raiseBtn');
-    const leaveBtn = document.getElementById('leaveTableBtn');
-    const raiseAmount = document.getElementById('raiseAmount');
-    const raiseValue = document.getElementById('raiseValue');
-    const confirmRaise = document.getElementById('confirmRaise');
-    const cancelRaise = document.getElementById('cancelRaise');
-
-    if (foldBtn) foldBtn.onclick = () => sendAction('fold');
-    if (checkBtn) checkBtn.onclick = () => sendAction('check');
-    if (callBtn) callBtn.onclick = () => sendAction('call');
-
-    if (raiseBtn) {
-        raiseBtn.onclick = () => {
-            const slider = document.getElementById('raiseSlider');
-            if (slider) slider.style.display = 'block';
-            if (raiseAmount && gameState) {
-                const minRaise = gameState.min_raise || 10;
-                const myPlayer = gameState.players?.find(p => p.user_id === currentUser?.id);
-                const maxRaise = myPlayer?.chips || 1000;
-                raiseAmount.min = minRaise;
-                raiseAmount.max = maxRaise;
-                raiseAmount.value = minRaise;
-                if (raiseValue) raiseValue.textContent = minRaise;
-            }
-        };
-    }
-
-    if (raiseAmount) {
-        raiseAmount.oninput = (e) => {
-            if (raiseValue) raiseValue.textContent = e.target.value;
-        };
-    }
-
-    if (confirmRaise) {
-        confirmRaise.onclick = () => {
-            const amount = raiseAmount ? parseInt(raiseAmount.value) : 100;
-            sendAction('raise', amount);
-            const slider = document.getElementById('raiseSlider');
-            if (slider) slider.style.display = 'none';
-        };
-    }
-
-    if (cancelRaise) {
-        cancelRaise.onclick = () => {
-            const slider = document.getElementById('raiseSlider');
-            if (slider) slider.style.display = 'none';
-        };
-    }
-
-    if (leaveBtn) {
-        leaveBtn.onclick = async () => {
-            if (confirm('Are you sure you want to leave the table?')) {
-                if (!isSpectator && currentUser) {
-                    try {
-                        await fetch(`/api/tables/${tableId}/leave?user_id=${currentUser.id}`, { method: 'POST' });
-                    } catch (_) { }
-                }
-                window.location.href = '/lobby';
-            }
-        };
-    }
-
-    // Keyboard shortcuts
-    document.addEventListener('keydown', (e) => {
-        const panel = document.getElementById('actionPanel');
-        if (!panel || panel.style.display === 'none' || isSpectator) return;
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-
-        if (e.key === 'f' || e.key === 'F') {
-            e.preventDefault();
-            sendAction('fold');
-        } else if (e.key === 'c' || e.key === 'C') {
-            e.preventDefault();
-            const myPlayer = gameState?.players?.find(p => p.user_id === currentUser?.id);
-            const toCall = (gameState?.current_bet || 0) - (myPlayer?.current_bet || 0);
-            sendAction(toCall <= 0 ? 'check' : 'call');
-        } else if (e.key === 'r' || e.key === 'R') {
-            e.preventDefault();
-            const raiseBtn2 = document.getElementById('raiseBtn');
-            if (raiseBtn2 && !raiseBtn2.disabled) raiseBtn2.click();
-        }
-    });
-
-    // Ping keep-alive
-    setInterval(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'ping' }));
-        }
-    }, 30000);
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Utilities
-// ═════════════════════════════════════════════════════════════════════════════
-
-function showToast(message, type = 'info') {
-    let toast = document.getElementById('toast');
-    if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'toast';
-        toast.className = 'toast';
-        document.body.appendChild(toast);
-    }
-    toast.textContent = message;
-    toast.className = `toast ${type} show`;
-    setTimeout(() => toast.classList.remove('show'), 3000);
-}
-
-function getSuitSymbol(suit) {
-    return { 'h': '♥', 'd': '♦', 'c': '♣', 's': '♠' }[suit] || suit;
-}
-
-function getSuitClass(suit) {
-    return { 'h': 'heart', 'd': 'diamond', 'c': 'club', 's': 'spade' }[suit] || '';
-}
-
-function getRankDisplay(rank) {
-    const r = parseInt(rank);
-    if (r === 14 || r === 1) return 'A';
-    if (r === 13) return 'K';
-    if (r === 12) return 'Q';
-    if (r === 11) return 'J';
-    return r;
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text ?? '';
-    return div.innerHTML;
-}
-
-// Start
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-} else {
-    init();
-}
+let ws=null,gameState=null,currentUser=null,isSpectator=false;
+let reconnectTimer=null,reconnectAttempts=0,timerInterval=null;
+const tableId=window.tableId,tableName=window.tableName;
+
+async function init(){await loadUser();const p=new URLSearchParams(location.search);isSpectator=p.get('spectate')==='true'||!currentUser;if(isSpectator){hide('actionPanel');show('spectatorBanner');}$('tableName').textContent=tableName||'Table';renderSeats([]);connectWS();setupEvents();setupTableChat();loadTournamentInfo();}
+async function loadUser(){try{const r=await fetch('/api/auth/me');if(r.ok){const d=await r.json();if(d?.id){currentUser=d;return;}}}catch(_){}currentUser=null;}
+function connectWS(){if(ws&&(ws.readyState===0||ws.readyState===1))return;const proto=location.protocol==='https:'?'wss:':'ws:';ws=new WebSocket(`${proto}//${location.host}/ws/${tableId}/${currentUser?.id||'spectator'}`);ws.onopen=()=>{reconnectAttempts=0;if(!isSpectator)toast('Connected','success');};ws.onmessage=e=>{try{onMsg(JSON.parse(e.data));}catch(x){console.error(x);}};ws.onclose=()=>{if(!isSpectator)toast('Disconnected','error');recon();};ws.onerror=()=>{};}
+function recon(){if(reconnectTimer)clearTimeout(reconnectTimer);if(reconnectAttempts>=10){toast('Connection lost','error');return;}reconnectTimer=setTimeout(connectWS,Math.min(1e3*Math.pow(2,reconnectAttempts++),3e4));}
+function onMsg(m){switch(m.type){case'game_update':case'game_state':render(m.data||m);break;case'reconnected':toast('Reconnected!','success');break;case'blind_level_change':toast(`Level ${m.level}: ${m.small_blind}/${m.big_blind}`,'info');break;case'player_eliminated':toast(`${m.username||'?'} out (#${m.rank})`,'info');loadTournamentInfo();break;case'table_chat':addTableChat(m);break;case'error':toast(m.message||'Error','error');break;case'pong':break;}}
+
+function render(s){gameState=s;if(!s)return;$('pot').textContent=`Pot: ${(s.pot||0).toLocaleString()}`;['flop1','flop2','flop3','turn','river'].forEach((id,i)=>{const el=$(id);if(!el)return;if(s.community_cards?.[i]){el.className='card';el.innerHTML=cardHtml(s.community_cards[i]);}else{el.className='card back';el.innerHTML='';}});renderSeats(s.players||[]);updateInfo(s);startActionTimer(s);if(!isSpectator&&currentUser){const myTurn=s.current_actor===currentUser.id&&s.status==='in_progress';updateActions(myTurn,s);}}
+function cardHtml(c){if(!c||c==='back')return'';const r=c.slice(0,-1),s=c.slice(-1);return`<span class="card-face ${suitCls(s)}">${rankTxt(r)}${suitSym(s)}</span>`;}
+
+function renderSeats(players){const ctr=$('playersContainer');if(!ctr)return;ctr.innerHTML='';const max=gameState?.max_players||9;
+for(let i=0;i<max;i++){const pl=players.find(p=>p.position===i)||(i<players.length?players[i]:null);const has=!!pl?.user_id;const d=document.createElement('div');d.dataset.seat=i;
+if(!has){d.className='player-seat empty';d.innerHTML=`<div class="seat-avatar">💺</div><div class="seat-info"><div class="seat-name">Seat ${i+1}</div><div class="seat-chips">—</div></div>`;}
+else{const me=pl.user_id===currentUser?.id,st=pl.status||'active';const isTurn=gameState?.current_actor===pl.user_id&&gameState?.status==='in_progress';const cls=['player-seat','occupied'];if(me)cls.push('me');if(st==='folded')cls.push('folded');if(st==='disconnected'||st==='sitting_out')cls.push('absent');if(isTurn)cls.push('active-turn');d.className=cls.join(' ');
+const av=pl.avatar?.startsWith('/')?pl.avatar:`/assets/images/avatars/${pl.avatar||'default'}.svg`;
+let cards='';if(pl.hole_cards?.length)cards=`<div class="seat-cards">${pl.hole_cards.map(c=>`<div class="mini-card ${suitCls(c.slice(-1))}">${rankTxt(c.slice(0,-1))}${suitSym(c.slice(-1))}</div>`).join('')}</div>`;else if((st==='active'||st==='all_in')&&gameState?.status==='in_progress')cards='<div class="seat-cards"><div class="mini-card back"></div><div class="mini-card back"></div></div>';
+let timerHtml='';if(isTurn&&gameState?.action_timer!=null){const pct=Math.max(0,Math.min(100,(gameState.action_timer/20)*100));const color=pct>50?'#27ae60':pct>25?'#ff9800':'#e74c3c';timerHtml=`<div class="seat-timer"><div class="seat-timer-bar" style="width:${pct}%;background:${color}"></div></div>`;}
+const mk=[];if(pl.is_dealer)mk.push('<span class="marker marker-d">D</span>');if(pl.is_small_blind)mk.push('<span class="marker marker-sb">SB</span>');if(pl.is_big_blind)mk.push('<span class="marker marker-bb">BB</span>');if(st==='all_in')mk.push('<span class="marker marker-allin">ALL IN</span>');if(st==='disconnected'||st==='sitting_out')mk.push('<span class="marker" style="background:#555;color:#ccc;font-size:8px">AFK</span>');
+const chips=pl.chips??pl.stack??0,bet=pl.current_bet||pl.bet||0;
+d.innerHTML=`${cards}<div class="seat-avatar"><img src="${av}" alt="${esc(pl.username)}" onerror="this.parentElement.innerHTML='👤'"></div>${timerHtml}<div class="seat-info"><div class="seat-name">${esc(pl.username)}</div><div class="seat-chips">${chips.toLocaleString()}</div></div>${bet>0?`<div class="seat-bet">${bet.toLocaleString()}</div>`:''}${mk.length?`<div class="marker-row">${mk.join('')}</div>`:''}`;}
+ctr.appendChild(d);}
+if(currentUser){const me=players.find(p=>p.user_id===currentUser.id);if(me){if($('playerChips'))$('playerChips').textContent=`${(me.chips??me.stack??0).toLocaleString()} chips`;if($('playerBet'))$('playerBet').textContent=`Bet: ${me.current_bet||me.bet||0}`;}}}
+
+function startActionTimer(s){if(timerInterval){clearInterval(timerInterval);timerInterval=null;}const te=$('actionTimer');if(!te)return;if(!s.action_timer||!s.current_actor||s.status!=='in_progress'){te.textContent='';return;}let secs=s.action_timer;const isMe=s.current_actor===currentUser?.id;te.textContent=`${isMe?'YOUR TURN':'Waiting'} ${secs}s`;te.style.color=secs>10?'#27ae60':secs>5?'#ff9800':'#e74c3c';timerInterval=setInterval(()=>{secs--;if(secs<=0){clearInterval(timerInterval);te.textContent='Time!';return;}te.textContent=`${isMe?'YOUR TURN':'Waiting'} ${secs}s`;te.style.color=secs>10?'#27ae60':secs>5?'#ff9800':'#e74c3c';},1000);}
+function updateInfo(s){const m={waiting:'Waiting',in_progress:'In Game',finished:'Done',showdown:'Showdown'};if($('gameStatus'))$('gameStatus').textContent=m[s.status]||s.status;if($('gameRound'))$('gameRound').textContent=s.round||0;if($('bettingRound'))$('bettingRound').textContent=s.betting_round||'Preflop';if($('gameBlinds'))$('gameBlinds').textContent=`${s.small_blind||'?'}/${s.big_blind||'?'}`;const alive=(s.players||[]).filter(p=>p.status==='active'||p.status==='all_in').length;if($('playersAlive'))$('playersAlive').textContent=alive;}
+
+function setupTableChat(){const input=$('tableChatInput'),btn=$('tableChatSend');if(!input||!btn)return;if(!currentUser||isSpectator){input.placeholder='Login to chat';input.disabled=true;btn.disabled=true;return;}input.disabled=false;btn.disabled=false;btn.addEventListener('click',sendTableChat);input.addEventListener('keydown',e=>{if(e.key==='Enter')sendTableChat();});}
+function sendTableChat(){const input=$('tableChatInput');if(!input||!ws||ws.readyState!==1)return;const text=input.value.trim();if(!text)return;ws.send(JSON.stringify({type:'chat',message:text}));input.value='';}
+function addTableChat(m){const c=$('tableChatMessages');if(!c)return;const d=document.createElement('div');d.className='tchat-msg';const time=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});if(m.username)d.innerHTML=`<span class="tchat-time">[${time}]</span> <span class="tchat-user">${esc(m.username)}</span>: ${esc(m.message)}`;else{d.className='tchat-msg tchat-system';d.innerHTML=`<span class="tchat-time">[${time}]</span> ${esc(m.message)}`;}c.appendChild(d);d.scrollIntoView({behavior:'smooth'});while(c.children.length>100)c.removeChild(c.firstChild);}
+
+async function loadTournamentInfo(){try{const r=await fetch('/api/tournaments');if(!r.ok)return;const all=await r.json();const t=all.find(x=>x.tables?.includes(tableId));if(!t){$('tournamentInfo')&&($('tournamentInfo').innerHTML='');return;}const el=$('tournamentInfo');if(!el)return;const reg=(t.registered_players||[]).filter(p=>p.status==='registered');const total=t.total_players||t.players_count||0;const itm=Math.max(1,Math.floor(total*(t.itm_percentage||10)/100));const ranked=[...reg].sort((a,b)=>(b.chips||0)-(a.chips||0));el.innerHTML=`<div class="tournament-bar"><span>🏆 ${esc(t.name)}</span><span>Remaining: <b>${reg.length}</b>/${total}</span><span>ITM: <b>${itm}</b></span><span>Prize: ${(t.prize_pool||0).toLocaleString()}</span><span>Lvl ${(t.current_level||0)+1}</span></div><div class="ranking-mini">${ranked.slice(0,5).map((p,i)=>`<span class="rank-item ${p.user_id===currentUser?.id?'rank-me':''}">#${i+1} ${esc(p.username)} <small>${(p.chips||0).toLocaleString()}</small></span>`).join('')}${reg.length>5?`<span class="rank-item">...+${reg.length-5}</span>`:''}</div>`;}catch(_){}}
+
+function updateActions(myTurn,s){const panel=$('actionPanel');if(!myTurn||s.status!=='in_progress'){if(panel)panel.style.display='none';return;}if(panel)panel.style.display='flex';const me=s.players?.find(p=>p.user_id===currentUser?.id);const chips=me?.chips??me?.stack??0,toCall=Math.max(0,(s.current_bet||0)-(me?.current_bet||me?.bet||0));const ck=$('checkBtn'),ca=$('callBtn'),ra=$('raiseBtn');if(toCall<=0){if(ck){ck.style.display='inline-block';ck.textContent='Check (C)';}if(ca)ca.style.display='none';}else{if(ck)ck.style.display='none';if(ca){ca.style.display='inline-block';ca.textContent=toCall>=chips?`All-In ${chips}`:`Call ${toCall} (C)`;}}if(ra)ra.disabled=chips<=toCall;}
+function act(a,amt=0){if(ws?.readyState===1)ws.send(JSON.stringify({type:'action',action:a,amount:amt}));else toast('Not connected','error');}
+
+function setupEvents(){$('foldBtn')?.addEventListener('click',()=>act('fold'));$('checkBtn')?.addEventListener('click',()=>act('check'));$('callBtn')?.addEventListener('click',()=>act('call'));$('raiseBtn')?.addEventListener('click',()=>{const sl=$('raiseSlider');if(sl)sl.style.display='flex';const am=$('raiseAmount');if(am&&gameState){const mn=gameState.min_raise||gameState.big_blind||20;const me=gameState.players?.find(p=>p.user_id===currentUser?.id);am.min=mn;am.max=me?.chips??me?.stack??1e4;am.value=mn;$('raiseValue').textContent=mn;}});$('raiseAmount')?.addEventListener('input',e=>{if($('raiseValue'))$('raiseValue').textContent=e.target.value;});$('confirmRaise')?.addEventListener('click',()=>{act('raise',parseInt($('raiseAmount')?.value||100));const s=$('raiseSlider');if(s)s.style.display='none';});$('cancelRaise')?.addEventListener('click',()=>{const s=$('raiseSlider');if(s)s.style.display='none';});$('leaveTableBtn')?.addEventListener('click',async()=>{if(!confirm('Leave?'))return;if(!isSpectator&&currentUser)try{await fetch(`/api/tables/${tableId}/leave?user_id=${currentUser.id}`,{method:'POST'});}catch(_){}location.href='/lobby';});
+document.addEventListener('keydown',e=>{const p=$('actionPanel');if(!p||p.style.display==='none'||isSpectator)return;if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;if(e.key==='f'||e.key==='F'){e.preventDefault();act('fold');}else if(e.key==='c'||e.key==='C'){e.preventDefault();const me=gameState?.players?.find(p=>p.user_id===currentUser?.id);act((gameState?.current_bet||0)-(me?.current_bet||me?.bet||0)<=0?'check':'call');}else if(e.key==='r'||e.key==='R'){e.preventDefault();$('raiseBtn')?.click();}});
+setInterval(()=>{if(ws?.readyState===1)ws.send(JSON.stringify({type:'ping'}));},25e3);setInterval(loadTournamentInfo,15e3);}
+
+function $(id){return document.getElementById(id);}
+function hide(id){const e=$(id);if(e)e.style.display='none';}
+function show(id){const e=$(id);if(e)e.style.display='block';}
+function toast(m,t='info'){let e=$('toast');if(!e){e=document.createElement('div');e.id='toast';e.className='toast';document.body.appendChild(e);}e.textContent=m;e.className=`toast ${t} show`;setTimeout(()=>e.classList.remove('show'),3e3);}
+function suitSym(s){return{h:'♥',d:'♦',c:'♣',s:'♠'}[s]||s;}
+function suitCls(s){return{h:'heart',d:'diamond',c:'club',s:'spade'}[s]||'';}
+function rankTxt(r){return{T:'10',J:'J',Q:'Q',K:'K',A:'A'}[r]||r;}
+function esc(t){const d=document.createElement('div');d.textContent=t??'';return d.innerHTML;}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

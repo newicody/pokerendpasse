@@ -142,7 +142,37 @@ async def startup_event():
  
     # Démarrer le monitor de tournois (event loop maintenant active)
     tournament_manager.start_monitor_safe()
- 
+    for t in tournament_manager.tournaments.values():
+        if t.status == TournamentStatus.IN_PROGRESS:
+            for tid in t.tables:
+                if tid not in lobby.tables:
+                    logger.info(f"Recreating table {tid} for tournament {t.name}")
+                    from backend.game_engine import PokerTable
+                    from backend.models import GameType
+                    blinds = t.get_current_blinds()
+                    table = PokerTable(
+                        table_id=tid,
+                        name=f"{t.name} — Table",
+                        game_type=GameType.TOURNAMENT,
+                        max_players=9,
+                        min_buy_in=0, max_buy_in=0,
+                        small_blind=blinds.get('small_blind', 10),
+                        big_blind=blinds.get('big_blind', 20),
+                        tournament_id=t.id,
+                    )
+                    lobby.tables[tid] = table
+                    # Re-ajouter les joueurs de cette table
+                    for p in t.players:
+                        if p.get('table_id') == tid and p.get('status') == 'registered':
+                            chips = p.get('chips', 10000)
+                            user_data = auth_manager.get_user_by_id(p['user_id'])
+                            if user_data:
+                                from backend.models import User
+                                user = User(**user_data)
+                                lobby.users[user.id] = user
+                                import asyncio
+                                asyncio.create_task(table.add_player(user, chips))
+                                logger.info(f"  → {p['username']} re-seated ({chips} chips)")
     # Nettoyer les vieux avatars
     try:
         now = datetime.utcnow()
@@ -171,19 +201,67 @@ async def lobby_page():
     lobby_file = FRONTEND_DIR / "lobby.html"
     return HTMLResponse(content=read_html_file(lobby_file)) if lobby_file.exists() else HTMLResponse("<h1>Lobby not found</h1>")
 
+@app.get("/api/tournaments/{tournament_id}/my-table")
+async def get_my_tournament_table(tournament_id: str, current_user: Dict = Depends(get_current_user)):
+    """Retourne la table du joueur dans un tournoi actif"""
+    tournament = tournament_manager.tournaments.get(tournament_id)
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+ 
+    if tournament.status != TournamentStatus.IN_PROGRESS:
+        raise HTTPException(status_code=400, detail="Tournament not in progress")
+ 
+    # Trouver la table du joueur
+    for player in tournament.players:
+        if player.get('user_id') == current_user['id'] and player.get('status') == 'registered':
+            table_id = player.get('table_id')
+            if table_id:
+                return json_response({
+                    "table_id": table_id,
+                    "position": player.get('position', 0),
+                    "chips": player.get('chips', 0),
+                })
+ 
+    raise HTTPException(status_code=404, detail="You are not in this tournament")
+'''
+ 
+ 
+# ═══════════════════════════════════════════════════════════════════════════════
+# 6. main.py — AJOUTER route /api/tournaments/{id}/player-table/{user_id}
+#    (pour le spectating d'un joueur spécifique)
+# ═══════════════════════════════════════════════════════════════════════════════
+ 
+MAIN_PLAYER_TABLE_ROUTE = '''
+@app.get("/api/tournaments/{tournament_id}/player-table/{user_id}")
+async def get_player_tournament_table(tournament_id: str, user_id: str):
+    """Retourne la table d'un joueur spécifique (pour spectating)"""
+    tournament = tournament_manager.tournaments.get(tournament_id)
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+ 
+    for player in tournament.players:
+        if player.get('user_id') == user_id and player.get('table_id'):
+            return json_response({
+                "table_id": player['table_id'],
+                "username": player.get('username', '?'),
+            })
+ 
+    raise HTTPException(status_code=404, detail="Player not found in tournament")
+
 @app.get("/table/{table_id}", response_class=HTMLResponse)
 async def table_page(table_id: str):
-    table = lobby.tables.get(table_id)
-    if not table:
-        raise HTTPException(status_code=404, detail="Table not found")
-    
     table_file = FRONTEND_DIR / "table.html"
-    if table_file.exists():
-        content = read_html_file(table_file)
-        script = f'<script>window.tableId = "{table_id}"; window.tableName = "{table.name}";</script>'
-        content = content.replace('</head>', f'{script}</head>')
-        return HTMLResponse(content=content)
-    return HTMLResponse("<h1>Table not found</h1>")
+    if not table_file.exists():
+        return HTMLResponse("<h1>Table page not found</h1>")
+    
+    # Chercher le nom de la table si elle existe en mémoire
+    table = lobby.tables.get(table_id)
+    table_name = table.name if table else table_id
+    
+    content = read_html_file(table_file)
+    script = f'<script>window.tableId = "{table_id}"; window.tableName = "{table_name}";</script>'
+    content = content.replace('</head>', f'{script}</head>')
+    return HTMLResponse(content=content)
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page():
