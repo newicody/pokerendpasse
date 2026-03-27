@@ -1024,3 +1024,387 @@
     color: #ffd700;
     font-weight: bold;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   PATCH CSS — Ajouter à la fin de frontend/css/lobby.css
+   Corrige : scrolling modals, smiley dropdown, responsive
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Modals : scrollable quand contenu dépasse ────────────────────────────── */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.75);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+/* Quand affiché avec display:flex */
+.modal[style*="display: flex"],
+.modal[style*="display:flex"] {
+    display: flex !important;
+}
+
+.modal-content {
+    background: linear-gradient(145deg, #1a3a2a, #0d2618);
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    border-radius: 16px;
+    padding: 25px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 85vh;
+    overflow-y: auto;
+    position: relative;
+    color: white;
+}
+
+.modal-content.large-modal {
+    max-width: 800px;
+}
+
+.modal-content.tournament-modal {
+    max-width: 700px;
+    max-height: 85vh;
+    overflow-y: auto;
+}
+
+.modal .close {
+    position: sticky;
+    top: 0;
+    float: right;
+    font-size: 28px;
+    cursor: pointer;
+    color: #ffd700;
+    z-index: 10;
+    background: rgba(0,0,0,0.5);
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+}
+
+.modal .close:hover {
+    background: rgba(255, 215, 0, 0.3);
+}
+
+/* ── Scrollbars personnalisés ────────────────────────────────────────────── */
+.modal-content::-webkit-scrollbar,
+.blind-structure-list::-webkit-scrollbar,
+.players-list::-webkit-scrollbar,
+.prize-list::-webkit-scrollbar,
+.chat-messages::-webkit-scrollbar,
+.history-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.modal-content::-webkit-scrollbar-track,
+.blind-structure-list::-webkit-scrollbar-track,
+.players-list::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 3px;
+}
+
+.modal-content::-webkit-scrollbar-thumb,
+.blind-structure-list::-webkit-scrollbar-thumb,
+.players-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 215, 0, 0.4);
+    border-radius: 3px;
+}
+
+.modal-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 215, 0, 0.6);
+}
+
+/* ── Sections dans le modal tournoi : scrollable ──────────────────────────── */
+.blind-structure-list,
+.prize-list,
+.players-list {
+    max-height: 250px;
+    overflow-y: auto;
+}
+
+.tournament-timeline {
+    max-height: none; /* pas de limite */
+}
+
+/* ── Smiley dropdown fix ────────────────────────────────────────────────── */
+.smiley-picker {
+    position: relative;
+}
+
+.smiley-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 20px;
+    padding: 4px 8px;
+    line-height: 1;
+}
+
+.smiley-dropdown {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    background: rgba(0, 0, 0, 0.95);
+    border: 1px solid rgba(255, 215, 0, 0.4);
+    border-radius: 10px;
+    padding: 10px;
+    display: none;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-width: 260px;
+    z-index: 200;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
+    margin-bottom: 5px;
+}
+
+.smiley-dropdown.visible {
+    display: flex !important;
+}
+
+.smiley-dropdown .emoji-item {
+    cursor: pointer;
+    font-size: 22px;
+    padding: 4px;
+    border-radius: 6px;
+    transition: background 0.15s;
+    user-select: none;
+}
+
+.smiley-dropdown .emoji-item:hover {
+    background: rgba(255, 215, 0, 0.2);
+    transform: scale(1.2);
+}
+
+/* ── Tournament tab content scrollable ────────────────────────────────────── */
+.tournament-tab-content {
+    display: none;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.tournament-tab-content.active {
+    display: block;
+}
+
+/* ── Badges améliorés ────────────────────────────────────────────────────── */
+.badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.badge.registration,
+.tournament-status.registration {
+    background: rgba(46, 204, 113, 0.3);
+    color: #2ecc71;
+}
+
+.badge.in_progress,
+.tournament-status.in_progress {
+    background: rgba(255, 152, 0, 0.3);
+    color: #ff9800;
+}
+
+.badge.finished {
+    background: rgba(149, 165, 166, 0.3);
+    color: #95a5a6;
+}
+
+.badge.cancelled {
+    background: rgba(231, 76, 60, 0.3);
+    color: #e74c3c;
+}
+
+/* ── Clock bar dans les cards ──────────────────────────────────────────────── */
+.clock-bar {
+    text-align: center;
+    padding: 8px;
+    margin: 10px 0;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+    font-size: 13px;
+}
+
+/* ── Empty state ──────────────────────────────────────────────────────────── */
+.empty-state {
+    text-align: center;
+    padding: 30px;
+    color: rgba(255, 255, 255, 0.4);
+    font-style: italic;
+}
+
+/* ── Section headers ──────────────────────────────────────────────────────── */
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.section-header h2 {
+    margin: 0;
+    color: #ffd700;
+    font-size: 20px;
+}
+
+.section-badge {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    background: rgba(255, 215, 0, 0.2);
+    color: #ffd700;
+}
+
+/* ── All-in marker ────────────────────────────────────────────────────────── */
+.allin-marker {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background: #e74c3c;
+    color: white;
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-weight: bold;
+}
+
+/* ── Chat media button ────────────────────────────────────────────────────── */
+#mediaBtn {
+    background: transparent;
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 18px;
+    padding: 4px 10px;
+}
+
+/* ── Admin button dans le lobby header ────────────────────────────────────── */
+.admin-btn {
+    padding: 6px 14px;
+    background: rgba(255, 215, 0, 0.2);
+    color: #ffd700;
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.admin-btn:hover {
+    background: rgba(255, 215, 0, 0.3);
+}
+
+/* ── Server time display ──────────────────────────────────────────────────── */
+.server-time {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.user-status-text {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* ── Form styles pour les modals ──────────────────────────────────────────── */
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13px;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    border-radius: 8px;
+    color: white;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    outline: none;
+    border-color: #ffd700;
+}
+
+.form-group.checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.form-group.checkbox input {
+    width: auto;
+}
+
+.btn-primary {
+    padding: 10px 20px;
+    background: #ffd700;
+    color: #1a472a;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+.btn-primary:hover {
+    background: #ffb347;
+}
+
+/* ── Toast amélioré ──────────────────────────────────────────────────────── */
+.toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.9);
+    color: white;
+    padding: 12px 24px;
+    border-radius: 10px;
+    z-index: 2000;
+    transform: translateX(400px);
+    transition: transform 0.3s;
+    font-size: 14px;
+    max-width: 350px;
+    border-left: 4px solid #ffd700;
+}
+
+.toast.show {
+    transform: translateX(0);
+}
+
+.toast.success {
+    border-left-color: #27ae60;
+}
+
+.toast.error {
+    border-left-color: #e74c3c;
+}
+
+.toast.info {
+    border-left-color: #3498db;
+}

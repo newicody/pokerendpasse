@@ -145,7 +145,7 @@
             opacity: 0.7;
             margin-top: 5px;
         }
-        .btn-primary {
+        .profile-container .btn-primary {
             padding: 10px 20px;
             background: #ffd700;
             color: #1a472a;
@@ -154,8 +154,8 @@
             cursor: pointer;
             font-weight: bold;
         }
-        .btn-primary:hover { background: #ffb347; }
-        .btn-small {
+        .profile-container .btn-primary:hover { background: #ffb347; }
+        .profile-container .btn-small {
             padding: 6px 12px;
             background: rgba(255, 215, 0, 0.2);
             color: #ffd700;
@@ -164,7 +164,7 @@
             cursor: pointer;
             font-size: 12px;
         }
-        .btn-danger {
+        .profile-container .btn-danger {
             padding: 10px 20px;
             background: #e74c3c;
             color: white;
@@ -172,7 +172,8 @@
             border-radius: 8px;
             cursor: pointer;
         }
-        .modal {
+        .profile-container .btn-danger:hover { background: #c0392b; }
+        .profile-container .modal {
             display: none;
             position: fixed;
             top: 0; left: 0;
@@ -182,15 +183,17 @@
             align-items: center;
             justify-content: center;
         }
-        .modal-content {
+        .profile-container .modal-content {
             background: #1a472a;
             padding: 30px;
             border-radius: 16px;
             max-width: 500px;
             width: 90%;
+            max-height: 85vh;
+            overflow-y: auto;
             border: 1px solid rgba(255, 215, 0, 0.3);
         }
-        .modal .close {
+        .profile-container .modal .close {
             float: right;
             font-size: 28px;
             cursor: pointer;

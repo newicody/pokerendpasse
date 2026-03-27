@@ -66,26 +66,30 @@ class Lobby:
     async def create_table(self, request) -> Table:
         """Crée une nouvelle table pour un tournoi"""
         from .game_engine import PokerTable
-        
-        table_id = f"table_{len(self.tables) + 1}"
-        
-        blinds = {'small_blind': 10, 'big_blind': 20}  # Blinds par défaut
-        
+ 
+        table_id = f"table_{uuid.uuid4().hex[:8]}"
+ 
+        # game_type est optionnel dans CreateTableRequest
+        # On récupère depuis request si disponible, sinon TOURNAMENT par défaut
+        game_type = getattr(request, 'game_type', None) or GameType.TOURNAMENT
+ 
+        # Blinds par défaut (seront mises à jour par le tournament manager)
+        blinds = {'small_blind': 10, 'big_blind': 20}
+ 
         table = PokerTable(
             table_id=table_id,
             name=request.name,
-            game_type=request.game_type,
+            game_type=game_type,
             max_players=request.max_players,
             min_buy_in=0,
             max_buy_in=0,
             small_blind=blinds['small_blind'],
             big_blind=blinds['big_blind']
         )
-        
+ 
         self.tables[table_id] = table
         logger.info(f"Table {table_id} created: {request.name}")
-        
-        # Retourner les infos de la table
+ 
         return table.get_info()
                 
     async def start(self):

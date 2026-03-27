@@ -822,13 +822,18 @@ function setupEventListeners() {
     const smileyBtn = document.getElementById('smileyBtn');
     const smileyDropdown = document.getElementById('smileyDropdown');
     if (smileyBtn && smileyDropdown) {
-        const emojis = ['😊', '😂', '🤣', '😍', '🤔', '😎', '🙄', '😢', '😡', '🎉', '👍', '👎', '🔥', '💰', '🃏', '♠️', '♥️', '♣️', '♦️', '🏆'];
-        smileyDropdown.innerHTML = emojis.map(e => `<span class="emoji-item" style="cursor:pointer;font-size:20px;padding:4px">${e}</span>`).join('');
-        smileyDropdown.style.cssText = 'position:absolute;bottom:100%;left:0;background:rgba(0,0,0,0.9);border:1px solid rgba(255,215,0,0.3);border-radius:8px;padding:8px;display:none;flex-wrap:wrap;gap:4px;max-width:250px;z-index:100';
+        const emojis = ['😊', '😂', '🤣', '😍', '🤔', '😎', '🙄', '😢', '😡', '🎉',
+                        '👍', '👎', '🔥', '💰', '🃏', '♠️', '♥️', '♣️', '♦️', '🏆',
+                        '😏', '🤑', '😤', '🥳', '🤯', '💀', '🎲', '🍀', '⭐', '💎'];
+        smileyDropdown.innerHTML = emojis.map(e =>
+            `<span class="emoji-item">${e}</span>`
+        ).join('');
 
-        smileyBtn.onclick = () => {
-            smileyDropdown.style.display = smileyDropdown.style.display === 'none' ? 'flex' : 'none';
-        };
+        // Toggle avec classe CSS (pas style inline)
+        smileyBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            smileyDropdown.classList.toggle('visible');
+        });
 
         smileyDropdown.addEventListener('click', (e) => {
             if (e.target.classList.contains('emoji-item')) {
@@ -837,7 +842,14 @@ function setupEventListeners() {
                     input.value += e.target.textContent;
                     input.focus();
                 }
-                smileyDropdown.style.display = 'none';
+                smileyDropdown.classList.remove('visible');
+            }
+        });
+
+        // Fermer quand on clique ailleurs
+        document.addEventListener('click', (e) => {
+            if (!smileyBtn.contains(e.target) && !smileyDropdown.contains(e.target)) {
+                smileyDropdown.classList.remove('visible');
             }
         });
     }

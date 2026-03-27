@@ -556,55 +556,81 @@ function updatePrizePreview() {
 window.editTournament = async function(tournamentId) {
     try {
         const response = await fetch(`/api/tournaments/${tournamentId}`);
-        if (!response.ok) throw new Error('Failed to load tournament');
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${response.status}`);
+        }
         const tournament = await response.json();
-        
-        document.getElementById('editTournamentId').value = tournament.id;
-        document.getElementById('editTournamentName').value = tournament.name;
-        document.getElementById('editTournamentDescription').value = tournament.description || '';
-        document.getElementById('editMaxPlayers').value = tournament.max_players;
-        document.getElementById('editMinPlayersToStart').value = tournament.min_players_to_start || 4;
-        document.getElementById('editPrizePool').value = tournament.prize_pool || 0;
-        document.getElementById('editItmPercentage').value = tournament.itm_percentage || 10;
-        
-        // Formater les dates
+ 
+        // Remplir les champs (avec vérification d'existence)
+        const setVal = (id, val) => {
+            const el = document.getElementById(id);
+            if (el) el.value = val ?? '';
+        };
+ 
+        setVal('editTournamentId', tournament.id);
+        setVal('editTournamentName', tournament.name);
+        setVal('editTournamentDescription', tournament.description);
+        setVal('editMaxPlayers', tournament.max_players);
+        setVal('editStartingChips', 10000); // default
+        setVal('editPrizePool', tournament.prize_pool);
+        setVal('editItmPercentage', tournament.itm_percentage);
+ 
+        // Formater les dates pour datetime-local
         const formatDateForInput = (dateStr) => {
             if (!dateStr) return '';
-            return dateStr.slice(0, 16);
+            try {
+                const d = new Date(dateStr);
+                return d.toISOString().slice(0, 16);
+            } catch (_) {
+                return dateStr.slice(0, 16);
+            }
         };
-        
-        document.getElementById('editRegistrationStart').value = formatDateForInput(tournament.registration_start);
-        document.getElementById('editRegistrationEnd').value = formatDateForInput(tournament.registration_end);
-        document.getElementById('editStartTime').value = formatDateForInput(tournament.start_time);
-        
+ 
+        setVal('editRegistrationStart', formatDateForInput(tournament.registration_start));
+        setVal('editRegistrationEnd', formatDateForInput(tournament.registration_end));
+        setVal('editStartTime', formatDateForInput(tournament.start_time));
+ 
         // Blind structure
-        currentBlindLevels = tournament.blind_structure || [];
-        renderEditBlindLevels();
-        
-        // Initialiser les onglets d'édition
+        if (typeof currentBlindLevels !== 'undefined') {
+            currentBlindLevels = tournament.blind_structure || [];
+            if (typeof renderEditBlindLevels === 'function') renderEditBlindLevels();
+        }
+ 
+        // Initialiser les onglets
         initEditFormTabs();
-        
-        document.getElementById('editTournamentModal').style.display = 'block';
+ 
+        const modal = document.getElementById('editTournamentModal');
+        if (modal) modal.style.display = 'block';
     } catch (error) {
         console.error('Error loading tournament:', error);
-        alert('Failed to load tournament');
+        alert('Failed to load tournament: ' + error.message);
     }
 };
 
 function initEditFormTabs() {
     const editModal = document.getElementById('editTournamentModal');
     if (!editModal) return;
-    
+ 
     const tabs = editModal.querySelectorAll('.form-tabs .tab-btn');
     const panes = editModal.querySelectorAll('.tab-pane');
-    
+ 
     tabs.forEach(tab => {
         tab.onclick = () => {
             const tabId = tab.getAttribute('data-tab');
             tabs.forEach(t => t.classList.remove('active'));
             panes.forEach(p => p.classList.remove('active'));
             tab.classList.add('active');
-            const activePane = editModal.querySelector(`#${tabId}`);
+ 
+            // Chercher le pane correspondant — essayer plusieurs patterns
+            // data-tab="edit-general" → id pourrait être "edit-tab-general" ou "edit-general"
+            let activePane = editModal.querySelector(`#edit-tab-${tabId.replace('edit-', '')}`);
+            if (!activePane) activePane = editModal.querySelector(`#${tabId}`);
+            if (!activePane) {
+                // Dernier recours : chercher par index
+                const idx = Array.from(tabs).indexOf(tab);
+                if (panes[idx]) activePane = panes[idx];
+            }
             if (activePane) activePane.classList.add('active');
         };
     });
