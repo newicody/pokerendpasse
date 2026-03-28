@@ -1,19 +1,19 @@
 {
   "table_id": "table_e5dafb54",
-  "name": "vssdv",
+  "name": "Unknown",
   "tournament_id": "tournament_eb805ecc",
-  "small_blind": 80,
-  "big_blind": 160,
+  "small_blind": 100,
+  "big_blind": 200,
   "max_players": 9,
-  "hand_round": 8,
-  "dealer_btn": 0,
+  "hand_round": 27,
+  "dealer_btn": 1,
   "status": "waiting",
   "players": {
     "5dc1ad2e-34c0-4308-991e-1f188ab66809": {
       "user_id": "5dc1ad2e-34c0-4308-991e-1f188ab66809",
       "username": "eric2",
       "avatar": "default",
-      "chips": 9760,
+      "chips": 9900,
       "position": 0,
       "status": "active"
     },
@@ -21,10 +21,10 @@
       "user_id": "9999076c-dc9e-4cdc-b812-577d40264b47",
       "username": "eric1",
       "avatar": "default",
-      "chips": 10000,
+      "chips": 9800,
       "position": 1,
       "status": "active"
     }
   },
-  "saved_at": "2026-03-27T09:43:31.248100"
+  "saved_at": "2026-03-28T07:13:53.239323"
 }

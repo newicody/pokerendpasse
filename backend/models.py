@@ -2,7 +2,7 @@
 from enum import Enum
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, validator
 import uuid
 
 # ==================== ENUMS ====================
@@ -212,7 +212,7 @@ class CreateTournamentRequest(BaseModel):
     itm_percentage: float = 10.0
     blind_structure: Optional[List[Dict]] = None
     
-    @field_validator('registration_start', 'registration_end', 'start_time', mode='before')
+    @validator('registration_start', 'registration_end', 'start_time')
     @classmethod
     def parse_datetime(cls, value):
         if isinstance(value, str):

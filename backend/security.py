@@ -13,7 +13,7 @@ import re
 import time
 import logging
 from collections import defaultdict
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 from fastapi import WebSocket, Request
 
 logger = logging.getLogger(__name__)
@@ -48,11 +48,15 @@ class RateLimiter:
         oldest = min(self._hits[key])
         return max(0, int(self.window - (time.time() - oldest)))
 
+    def reset(self, key: str):
+        """Reset le compteur pour une clé."""
+        self._hits.pop(key, None)
+
 
 # Instances globales
 login_limiter = RateLimiter(max_requests=5, window_seconds=60)       # 5 tentatives/min
 register_limiter = RateLimiter(max_requests=3, window_seconds=300)   # 3 inscriptions/5min
-ws_connect_limiter = RateLimiter(max_requests=20, window_seconds=60) # 20 connexions WS/min
+ws_connect_limiter = RateLimiter(max_requests=30, window_seconds=60) # 30 connexions WS/min
 
 
 def get_client_ip(request) -> str:
@@ -73,82 +77,114 @@ def get_client_ip(request) -> str:
 
 def get_cookie_params(request: Request) -> dict:
     """Détecte HTTPS et retourne les bons paramètres de cookie."""
-    is_https = (
-        request.url.scheme == 'https'
-        or request.headers.get('x-forwarded-proto') == 'https'
-    )
+    # Vérifier si on est en HTTPS
+    is_secure = False
+    
+    # Vérifier le schéma direct
+    if hasattr(request, 'url') and request.url.scheme == 'https':
+        is_secure = True
+    
+    # Vérifier les headers de proxy
+    if hasattr(request, 'headers'):
+        proto = request.headers.get('x-forwarded-proto', '')
+        if proto.lower() == 'https':
+            is_secure = True
+    
     return {
         'httponly': True,
-        'secure': is_https,
-        'samesite': 'lax' if not is_https else 'none',
+        'samesite': 'lax',
+        'secure': is_secure,
+        'path': '/',
     }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. Sanitization (HTML/XSS)
+# 3. Sanitization
 # ─────────────────────────────────────────────────────────────────────────────
 
 def sanitize_text(text: str, max_length: int = 1000) -> str:
-    """Nettoie un texte générique : escape HTML, limite la taille."""
+    """Sanitize général : escape HTML + limite longueur."""
     if not text:
-        return ''
+        return ""
+    
+    # Limiter la longueur
     text = text[:max_length]
-    text = html.escape(text, quote=True)
+    
+    # Échapper HTML
+    text = html.escape(text)
+    
     return text.strip()
 
 
-def sanitize_chat_message(message: str) -> str:
-    """Nettoie un message de chat : escape HTML, supprime les balises, limite."""
-    if not message:
-        return ''
-    # Strip HTML tags
-    message = re.sub(r'<[^>]+>', '', message)
-    # Escape ce qui reste
-    message = html.escape(message, quote=True)
-    # Limite de taille
-    return message[:500].strip()
-
-
 def sanitize_username(username: str) -> str:
-    """Nettoie un nom d'utilisateur : alphanum + underscore, 3-20 chars."""
+    """Nettoie un nom d'utilisateur : alphanumeric + underscore uniquement."""
     if not username:
-        return ''
-    # Ne garder que les caractères safe
-    clean = re.sub(r'[^\w\-.]', '', username)
-    return clean[:20].strip()
+        return ""
+    
+    # Garder uniquement alphanumeric et underscore
+    clean = re.sub(r'[^\w]', '', username)
+    
+    # Limiter à 32 caractères
+    return clean[:32]
+
+
+def sanitize_chat_message(message: str) -> str:
+    """Nettoie un message de chat."""
+    if not message:
+        return ""
+    
+    # Limiter la longueur
+    message = message[:500]
+    
+    # Échapper HTML
+    message = html.escape(message)
+    
+    # Supprimer les caractères de contrôle
+    message = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', message)
+    
+    return message.strip()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. Authentification WebSocket
 # ─────────────────────────────────────────────────────────────────────────────
 
-def authenticate_websocket(websocket: WebSocket, claimed_user_id: str) -> tuple:
+def authenticate_websocket(websocket: WebSocket, claimed_user_id: str) -> Tuple[str, bool]:
     """
-    Valide que le cookie de session correspond au user_id revendiqué.
-    Retourne (user_id_validé, is_spectator).
+    Authentifie une connexion WebSocket via le cookie de session.
+    
+    Retourne:
+        (user_id, is_spectator): Le vrai user_id et si forcé en spectateur
     """
     from .auth import auth_manager
-
+    
     # Récupérer le cookie de session
+    session_id = None
     cookies = websocket.cookies
-    session_id = cookies.get('poker_session')
-
+    
+    if cookies:
+        session_id = cookies.get('poker_session')
+    
     if not session_id:
-        logger.warning(f"WS auth: no session cookie for {claimed_user_id}")
-        return claimed_user_id, True  # Spectateur
-
+        # Pas de session, forcer en spectateur
+        logger.warning(f"WS auth: No session cookie for claimed user {claimed_user_id}")
+        return claimed_user_id, True
+    
     # Valider la session
     real_user_id = auth_manager.validate_session(session_id)
+    
     if not real_user_id:
-        logger.warning(f"WS auth: invalid session for {claimed_user_id}")
-        return claimed_user_id, True  # Spectateur
-
-    # Vérifier la correspondance
+        # Session invalide
+        logger.warning(f"WS auth: Invalid session for claimed user {claimed_user_id}")
+        return claimed_user_id, True
+    
+    # Vérifier que le user_id correspond
     if real_user_id != claimed_user_id:
-        logger.warning(f"WS auth: user_id mismatch — claimed {claimed_user_id}, session says {real_user_id}")
-        # Forcer le vrai user_id
+        logger.warning(f"WS auth: User ID mismatch - claimed {claimed_user_id}, actual {real_user_id}")
+        # Utiliser le vrai user_id
         return real_user_id, False
-
+    
+    # Tout est OK
     return real_user_id, False
 
 
@@ -156,16 +192,85 @@ def authenticate_websocket(websocket: WebSocket, claimed_user_id: str) -> tuple:
 # 5. XML Injection Prevention
 # ─────────────────────────────────────────────────────────────────────────────
 
-def xml_safe(text) -> str:
-    """Escape un texte pour insertion sûre dans du XML."""
+def xml_safe(text: str) -> str:
+    """Échappe les caractères dangereux pour XML."""
     if text is None:
-        return ''
-    s = str(text)
-    s = s.replace('&', '&amp;')
-    s = s.replace('<', '&lt;')
-    s = s.replace('>', '&gt;')
-    s = s.replace('"', '&quot;')
-    s = s.replace("'", '&apos;')
-    # Supprimer les caractères de contrôle XML interdits
-    s = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', s)
-    return s
+        return ""
+    
+    text = str(text)
+    
+    # Remplacer les caractères spéciaux XML
+    text = text.replace('&', '&amp;')
+    text = text.replace('<', '&lt;')
+    text = text.replace('>', '&gt;')
+    text = text.replace('"', '&quot;')
+    text = text.replace("'", '&apos;')
+    
+    # Supprimer les caractères de contrôle invalides en XML
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
+    
+    return text
+
+
+def validate_xml_content(content: str) -> bool:
+    """Vérifie qu'un contenu ne contient pas d'injection XML."""
+    if not content:
+        return True
+    
+    # Patterns dangereux
+    dangerous_patterns = [
+        r'<!ENTITY',
+        r'<!DOCTYPE',
+        r'<!\[CDATA\[',
+        r'<!--.*-->',
+        r'<\?xml',
+    ]
+    
+    for pattern in dangerous_patterns:
+        if re.search(pattern, content, re.IGNORECASE):
+            return False
+    
+    return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Utilitaires supplémentaires
+# ─────────────────────────────────────────────────────────────────────────────
+
+def generate_csrf_token() -> str:
+    """Génère un token CSRF."""
+    import secrets
+    return secrets.token_hex(32)
+
+
+def validate_csrf_token(token: str, expected: str) -> bool:
+    """Valide un token CSRF de manière constante en temps."""
+    import hmac
+    if not token or not expected:
+        return False
+    return hmac.compare_digest(token, expected)
+
+
+def hash_password(password: str) -> str:
+    """Hash un mot de passe avec bcrypt."""
+    import hashlib
+    import secrets
+    
+    # Simple hash SHA-256 avec salt (en production, utiliser bcrypt)
+    salt = secrets.token_hex(16)
+    hashed = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+    return f"{salt}:{hashed}"
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    """Vérifie un mot de passe contre son hash."""
+    import hashlib
+    import hmac
+    
+    if ':' not in stored_hash:
+        return False
+    
+    salt, expected_hash = stored_hash.split(':', 1)
+    actual_hash = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+    
+    return hmac.compare_digest(actual_hash, expected_hash)

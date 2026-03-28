@@ -1,1118 +1,830 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   table.css — PokerEndPasse — Table de poker
-   ─────────────────────────────────────────────────────────────────────────
-   Corrections :
-     • Fond de cartes toujours blanc (indépendant du thème)
-     • Sièges EN DEHORS de l'ovale (overflow visible)
-     • Timer bar avec transition CSS pour animation fluide
-     • Deck widget + ring status
-     • Grandes cartes perso en bas
-     • Historique des mains scrollable
-     • Thèmes via variables CSS (--accent, --bg-primary, etc.)
-   ═══════════════════════════════════════════════════════════════════════ */
+   table.css — Poker Table — Design professionnel refactorisé
+   Table ovale, sièges en retrait, timer animé, pot et mises visibles
+   ═══════════════════════════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&family=Fira+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;600&family=Fira+Mono&display=swap');
 
-/* ── Variables de secours (si ThemeManager pas encore appliqué) ─────── */
-:root {
-    --bg-primary:    #0a1f0d;
-    --bg-secondary:  rgba(0,0,0,0.6);
-    --accent:        #ffd700;
-    --accent-light:  #ffb347;
-    --text-primary:  #ffffff;
-    --text-secondary:rgba(255,255,255,0.7);
-    --border-color:  rgba(255,215,0,0.25);
-    --felt-color:    #1a472a;
-    --shadow-color:  rgba(0,0,0,0.5);
-
-    /* Variables spécifiques table */
-    --rail-brown:    #5d3a1a;
-    --rail-light:    #8b6914;
-    --gold:          #ffd700;
-    --ok:            #27ae60;
-    --warn:          #ff9800;
-    --danger:        #e74c3c;
-
-    /* IMPORTANT : fond des cartes toujours blanc, indépendant du thème */
-    --card-face-bg:  #f7f5f0;
-    --card-border:   #d0c8b0;
-}
-
-/* ════════════════════════════════════════════════════════════════════════
-   LAYOUT GÉNÉRAL
-   ════════════════════════════════════════════════════════════════════════ */
-
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-body {
-    font-family: 'Oswald', sans-serif;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    min-height: 100vh;
-    overflow-x: hidden;
-}
-
-.tournament-info-bar {
-    background: rgba(0,0,0,0.7);
-    border-bottom: 1px solid var(--border-color);
-    padding: 6px 20px;
+/* ── Layout principal ────────────────────────────────────────────────────── */
+.poker-room {
     display: flex;
-    gap: 24px;
-    font-family: 'Fira Mono', monospace;
-    font-size: 12px;
-    color: var(--accent);
-    min-height: 28px;
-    flex-wrap: wrap;
+    gap: 16px;
+    max-width: 1500px;
+    margin: 0 auto;
+    padding: 12px;
+    min-height: calc(100vh - 50px);
+    font-family: 'Oswald', sans-serif;
+    background: linear-gradient(160deg, var(--bg-primary) 0%, #0d2818 40%, #071210 100%);
+    color: var(--text-primary);
 }
 
-.spectator-banner {
-    text-align: center;
-    background: rgba(0,0,0,0.5);
+/* ── Barre tournoi (haut) ────────────────────────────────────────────────── */
+.tournament-info-bar {
+    background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
-    padding: 4px 12px;
+    font-family: 'Oswald', sans-serif;
     font-size: 13px;
+    min-height: 0;
+}
+
+.tournament-bar {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 16px;
+    flex-wrap: wrap;
     color: var(--text-secondary);
 }
 
-.poker-room {
-    display: flex;
-    gap: 12px;
-    max-width: 1500px;
-    margin: 0 auto;
-    padding: 8px 12px 12px;
-    min-height: calc(100vh - 60px);
-    align-items: flex-start;
+.tournament-bar b {
+    color: var(--accent);
 }
 
-/* ════════════════════════════════════════════════════════════════════════
-   ZONE TABLE (gauche)
-   ════════════════════════════════════════════════════════════════════════ */
+.ranking-mini {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    padding: 2px 16px 6px;
+    flex-wrap: wrap;
+    font-size: 11px;
+}
 
-.table-area {
+.rank-item {
+    background: rgba(255, 255, 255, 0.06);
+    padding: 2px 8px;
+    border-radius: 10px;
+    color: var(--text-secondary);
+}
+
+.rank-item small {
+    color: var(--accent);
+    margin-left: 3px;
+}
+
+.rank-me {
+    background: rgba(66, 165, 245, 0.25);
+    color: #42a5f5;
+    font-weight: 600;
+}
+
+/* ── Conteneur table ─────────────────────────────────────────────────────── */
+.table-container {
     flex: 3;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0;
-    min-width: 0;
-}
-
-/* Enveloppe avec padding pour que les sièges extérieurs soient visibles */
-.table-wrapper {
-    padding: 90px 140px 80px;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 100%;
+    min-height: 550px;
+    position: relative;
 }
 
-/* ── L'ovale ─────────────────────────────────────────────────────────── */
+/* ── Table de poker ──────────────────────────────────────────────────────── */
 .poker-table {
     position: relative;
-    width: 820px;
-    height: 440px;
-    border-radius: 220px;
-    /* Rail extérieur */
+    width: 780px;
+    height: 420px;
     background:
-        radial-gradient(ellipse 95% 90% at 50% 50%, var(--felt-color) 0%, color-mix(in srgb, var(--felt-color) 50%, #000) 85%, transparent 86%),
+        radial-gradient(ellipse 95% 90% at 50% 50%, var(--felt-green) 0%, var(--felt-dark) 85%, transparent 86%),
         radial-gradient(ellipse 100% 96% at 50% 50%, var(--rail-brown) 0%, #3a2210 90%, transparent 91%);
+    border-radius: 210px;
     box-shadow:
         0 0 0 8px #2a1a0a,
         0 0 0 12px #1a100a,
-        0 12px 50px rgba(0,0,0,0.8),
-        inset 0 0 80px rgba(0,0,0,0.35);
-    /* Les sièges débordent en dehors de l'ovale */
-    overflow: visible;
-    flex-shrink: 0;
+        0 8px 40px var(--shadow-strong),
+        inset 0 0 80px rgba(0, 0, 0, 0.3);
 }
 
-/* Feutre interne */
+/* Feutre intérieur */
 .poker-table::before {
     content: '';
     position: absolute;
-    inset: 16px;
-    border-radius: 200px;
+    top: 16px;
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    border-radius: 195px;
     background: radial-gradient(ellipse 80% 75% at 45% 40%,
-        color-mix(in srgb, var(--felt-color) 150%, #2e7d32) 0%,
-        var(--felt-color) 40%,
-        color-mix(in srgb, var(--felt-color) 50%, #000) 100%);
-    box-shadow: inset 0 0 60px rgba(0,0,0,0.4);
+        var(--felt-light, #2e7d32) 0%,
+        var(--felt-green) 40%,
+        var(--felt-dark) 100%);
+    box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.4);
     z-index: 0;
 }
 
-/* Liseré doré */
+/* Liseré or */
 .poker-table::after {
     content: '';
     position: absolute;
-    inset: 14px;
-    border-radius: 210px;
-    border: 1.5px solid rgba(255,215,0,0.18);
+    top: 14px;
+    left: 14px;
+    right: 14px;
+    bottom: 14px;
+    border-radius: 200px;
+    border: 1.5px solid rgba(var(--accent-rgb), 0.15);
     z-index: 1;
     pointer-events: none;
 }
 
-/* ════════════════════════════════════════════════════════════════════════
-   SIÈGES — POSITIONNÉS EN DEHORS DE L'OVALE
-   ════════════════════════════════════════════════════════════════════════
-   La table fait 820×440. Les sièges sont en absolute sur .players-container
-   qui lui-même est en absolute sur .poker-table (overflow:visible).
-   Les positions négatives ou > 100% placent les sièges à l'EXTÉRIEUR.
-   ════════════════════════════════════════════════════════════════════════ */
+/* ── Pot central ─────────────────────────────────────────────────────────── */
+.pot {
+    position: absolute;
+    top: 58%;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Fira Mono', monospace;
+    font-size: 16px;
+    font-weight: bold;
+    color: var(--accent);
+    text-shadow: 0 1px 4px var(--shadow-color);
+    background: rgba(0, 0, 0, 0.6);
+    padding: 6px 20px;
+    border-radius: 20px;
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    z-index: 12;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
 
+.pot-icon {
+    font-size: 14px;
+}
+
+/* ── Conteneur des joueurs ───────────────────────────────────────────────── */
 .players-container {
     position: absolute;
-    inset: 0;
-    pointer-events: none;
-    z-index: 20;
-    /* Dépasse de l'ovale grâce à overflow:visible du parent */
-}
-
-.player-seat {
-    position: absolute;
-    pointer-events: all;
-    width: 115px;
-    text-align: center;
-    /* Centrage par défaut — surchargé par data-seat */
-    transform: translate(-50%, -50%);
-    transition: opacity 0.3s;
-}
-
-/* ── 9 positions autour de l'ovale, en dehors du feutre ─────────────── */
-
-/* Siège 0 : bas-centre (joueur courant) */
-.player-seat[data-seat="0"] {
-    left: 50%;
-    top: calc(100% + 55px);
-    transform: translateX(-50%);
-}
-/* Siège 1 : bas-gauche */
-.player-seat[data-seat="1"] {
-    left: 8%;
-    top: calc(100% + 20px);
-    transform: none;
-}
-/* Siège 2 : gauche */
-.player-seat[data-seat="2"] {
-    left: -125px;
-    top: 55%;
-    transform: translateY(-50%);
-}
-/* Siège 3 : haut-gauche */
-.player-seat[data-seat="3"] {
-    left: 8%;
-    top: -75px;
-    transform: none;
-}
-/* Siège 4 : haut-centre-gauche */
-.player-seat[data-seat="4"] {
-    left: 30%;
-    top: -80px;
-    transform: translateX(-50%);
-}
-/* Siège 5 : haut-centre-droit */
-.player-seat[data-seat="5"] {
-    left: 70%;
-    top: -80px;
-    transform: translateX(-50%);
-}
-/* Siège 6 : haut-droit */
-.player-seat[data-seat="6"] {
-    right: 8%;
-    left: auto;
-    top: -75px;
-    transform: none;
-}
-/* Siège 7 : droit */
-.player-seat[data-seat="7"] {
-    right: -125px;
-    left: auto;
-    top: 55%;
-    transform: translateY(-50%);
-}
-/* Siège 8 : bas-droit */
-.player-seat[data-seat="8"] {
-    right: 8%;
-    left: auto;
-    top: calc(100% + 20px);
-    transform: none;
-}
-
-/* ── États des sièges ────────────────────────────────────────────────── */
-
-.player-seat.folded       { opacity: 0.40; }
-.player-seat.absent       { opacity: 0.55; filter: grayscale(50%); }
-.player-seat.empty        { opacity: 0.35; }
-
-/* ── Avatar ──────────────────────────────────────────────────────────── */
-
-.seat-avatar-wrap {
-    position: relative;
-    width: 58px;
-    height: 58px;
-    margin: 0 auto 4px;
-}
-
-.seat-avatar {
+    top: 0;
+    left: 0;
     width: 100%;
     height: 100%;
-    border-radius: 50%;
-    object-fit: cover;
-    border: 3px solid #444;
-    background: #1a1a1a;
-    display: block;
-    transition: border-color 0.3s, box-shadow 0.3s;
-    font-size: 28px;           /* fallback texte emoji */
-    line-height: 52px;
-    text-align: center;
+    z-index: 5;
 }
 
-.player-seat.occupied  .seat-avatar { border-color: var(--ok); box-shadow: 0 0 10px rgba(39,174,96,0.35); }
-.player-seat.me        .seat-avatar { border-color: #42a5f5;  box-shadow: 0 0 14px rgba(66,165,245,0.5); }
-.player-seat.active-turn .seat-avatar {
-    border-color: var(--gold);
-    box-shadow: 0 0 18px rgba(255,215,0,0.7);
-    animation: pulse-glow 1s ease-in-out infinite;
+/* ── Siège de joueur ─────────────────────────────────────────────────────── */
+.player-seat {
+    position: absolute;
+    text-align: center;
+    width: 100px;
+    transition: all var(--transition-normal);
+    z-index: 5;
 }
-.player-seat.absent    .seat-avatar { border-color: #666; }
-.player-seat.empty     .seat-avatar {
-    border: 2px dashed #444;
+
+/* Positions des sièges EN RETRAIT de la table (9 positions) */
+.player-seat[data-seat="0"] { bottom: -60px; left: 50%; transform: translateX(-50%); }
+.player-seat[data-seat="1"] { bottom: -20px; left: 8%; }
+.player-seat[data-seat="2"] { top: 20%; left: -8%; }
+.player-seat[data-seat="3"] { top: -15%; left: 15%; }
+.player-seat[data-seat="4"] { top: -15%; left: 50%; transform: translateX(-50%); }
+.player-seat[data-seat="5"] { top: -15%; right: 15%; }
+.player-seat[data-seat="6"] { top: 20%; right: -8%; }
+.player-seat[data-seat="7"] { bottom: -20px; right: 8%; }
+.player-seat[data-seat="8"] { bottom: 40%; right: -10%; }
+
+/* Joueur actif (son tour) */
+.player-seat.active-turn {
+    z-index: 10;
+}
+
+.player-seat.active-turn .seat-info {
+    border-color: var(--accent);
+    box-shadow: 0 0 15px rgba(var(--accent-rgb), 0.5);
+}
+
+/* Joueur fold */
+.player-seat.folded {
+    opacity: 0.5;
+}
+
+.player-seat.folded .seat-avatar {
+    filter: grayscale(100%);
+}
+
+/* Siège vide */
+.player-seat.empty {
+    opacity: 0.4;
+}
+
+.player-seat.empty .seat-name {
+    color: var(--text-muted);
+}
+
+.player-seat.empty .seat-avatar {
+    border-color: var(--text-muted);
+    border-style: dashed;
+}
+
+/* Avatar */
+.seat-avatar {
+    width: 48px;
+    height: 48px;
     border-radius: 50%;
+    background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
+    border: 3px solid var(--accent);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 22px;
-}
-
-@keyframes pulse-glow {
-    0%, 100% { box-shadow: 0 0 12px rgba(255,215,0,0.5); }
-    50%       { box-shadow: 0 0 28px rgba(255,215,0,0.9); }
-}
-
-/* ── Barre timer sous avatar ─────────────────────────────────────────── */
-
-.seat-timer {
-    position: absolute;
-    bottom: -3px;
-    left: 0;
-    right: 0;
-    height: 4px;
-    background: rgba(0,0,0,0.5);
-    border-radius: 2px;
+    font-size: 20px;
+    margin: 0 auto 4px;
     overflow: hidden;
+    box-shadow: 0 2px 8px var(--shadow-color);
 }
 
-.seat-timer-bar {
-    height: 100%;
-    border-radius: 2px;
+.seat-avatar img {
     width: 100%;
-    background: var(--ok);
-    /* Pas de transition CSS ici — le JS l'anime à 250 ms via style.width */
+    height: 100%;
+    object-fit: cover;
 }
 
-/* ── Nom + chips ─────────────────────────────────────────────────────── */
-
+/* Info du siège */
 .seat-info {
-    background: rgba(0,0,0,0.78);
-    border-radius: 8px;
-    padding: 3px 8px;
-    font-size: 11px;
-    line-height: 1.4;
-    backdrop-filter: blur(4px);
-    border: 1px solid rgba(255,255,255,0.06);
+    background: var(--bg-secondary);
+    border-radius: 10px;
+    padding: 6px 10px;
     min-width: 90px;
+    border: 1px solid var(--border-subtle);
+    backdrop-filter: blur(5px);
 }
 
 .seat-name {
-    color: #fff;
+    font-size: 12px;
     font-weight: 600;
+    color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 110px;
-    font-size: 12px;
+    max-width: 85px;
 }
 
-.seat-chips {
-    color: var(--gold);
+.seat-stack {
     font-family: 'Fira Mono', monospace;
     font-size: 11px;
-    font-weight: 500;
+    color: var(--accent);
+    margin-top: 2px;
 }
 
-.player-seat.empty .seat-info { opacity: 0.3; }
-
-/* ── Mises du joueur (chip devant la table) ──────────────────────────── */
-
-.seat-bet {
+/* ── Badge AFK ───────────────────────────────────────────────────────────── */
+.afk-badge {
     position: absolute;
-    /* Pointe vers le centre de la table — positionné en bas du siège */
-    bottom: -18px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(0,0,0,0.8);
-    border: 1px solid var(--gold);
-    border-radius: 12px;
-    padding: 2px 8px 2px 6px;
+    top: -5px;
+    right: -5px;
+    background: var(--danger);
+    color: white;
+    font-size: 8px;
+    padding: 2px 5px;
+    border-radius: 8px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+/* ── Mises des joueurs (sur la table) ────────────────────────────────────── */
+.player-bet {
+    position: absolute;
     font-family: 'Fira Mono', monospace;
     font-size: 11px;
-    color: var(--gold);
+    color: var(--accent);
+    background: rgba(0, 0, 0, 0.75);
+    padding: 3px 8px;
+    border-radius: 12px;
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    z-index: 11;
+    white-space: nowrap;
     display: flex;
     align-items: center;
     gap: 4px;
-    white-space: nowrap;
-    z-index: 30;
 }
 
-.chip-dot {
-    width: 10px;
-    height: 10px;
+.player-bet::before {
+    content: '';
+    width: 12px;
+    height: 12px;
+    background: linear-gradient(135deg, #ffd700 0%, #ff9800 100%);
     border-radius: 50%;
-    background: radial-gradient(circle at 35% 35%, #fff 0%, var(--gold) 45%, #8b6914 100%);
-    border: 1px solid #8b6914;
-    flex-shrink: 0;
+    border: 1px solid #cc9900;
 }
 
-/* ── Marqueurs (D, SB, BB, AFK…) ────────────────────────────────────── */
+/* Positions des mises (proches du pot) */
+.player-bet[data-pos="0"] { bottom: 35%; left: 50%; transform: translateX(-50%); }
+.player-bet[data-pos="1"] { bottom: 32%; left: 25%; }
+.player-bet[data-pos="2"] { top: 45%; left: 18%; }
+.player-bet[data-pos="3"] { top: 30%; left: 28%; }
+.player-bet[data-pos="4"] { top: 28%; left: 50%; transform: translateX(-50%); }
+.player-bet[data-pos="5"] { top: 30%; right: 28%; }
+.player-bet[data-pos="6"] { top: 45%; right: 18%; }
+.player-bet[data-pos="7"] { bottom: 32%; right: 25%; }
+.player-bet[data-pos="8"] { top: 50%; right: 20%; }
 
+/* ── Markers (Dealer, SB, BB) ────────────────────────────────────────────── */
 .marker-row {
     display: flex;
-    gap: 3px;
     justify-content: center;
-    flex-wrap: wrap;
+    gap: 3px;
     margin-top: 3px;
 }
 
 .marker {
-    border-radius: 4px;
-    padding: 1px 5px;
-    font-size: 9px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-.marker-d     { background: var(--gold);   color: #000; }
-.marker-sb    { background: #2196f3;       color: #fff; }
-.marker-bb    { background: #e91e63;       color: #fff; }
-.marker-allin { background: var(--danger); color: #fff; }
-.marker-afk   { background: #555;          color: #aaa; }
-
-/* ── Mini cartes dans les sièges ─────────────────────────────────────── */
-
-.seat-cards {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
     display: flex;
-    gap: 2px;
+    align-items: center;
     justify-content: center;
-    margin-bottom: 3px;
-}
-
-/* IMPORTANT : fond toujours blanc pour les cartes face visible */
-.card-mini {
-    font-family: 'Fira Mono', monospace;
-    font-size: 13px;
-    font-weight: 700;
-    background: var(--card-face-bg);  /* blanc — jamais sombre */
-    border: 1px solid var(--card-border);
-    border-radius: 3px;
-    padding: 1px 3px;
-    line-height: 1;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
-}
-.card-mini.hearts,
-.card-mini.diamonds { color: #c62828; }
-.card-mini.clubs,
-.card-mini.spades   { color: #1a1a1a; }
-.card-mini.back     {
-    background: linear-gradient(135deg, #1a237e, #0d47a1);
-    border-color: #1565c0;
-    color: rgba(255,255,255,0.3);
-}
-
-/* ════════════════════════════════════════════════════════════════════════
-   ZONE CENTRALE (community cards + deck + pot)
-   ════════════════════════════════════════════════════════════════════════ */
-
-.center-area {
-    position: absolute;
-    top: 42%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    z-index: 10;
-}
-
-/* Rangée horizontale : deck widget + cartes community */
-.center-row {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-}
-
-/* ── Deck Widget ─────────────────────────────────────────────────────── */
-
-.deck-widget {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 5px;
-    flex-shrink: 0;
-}
-
-.deck-stack {
-    position: relative;
-    width: 46px;
-    height: 64px;
-}
-
-.deck-card {
-    position: absolute;
-    width: 40px;
-    height: 57px;
-    border-radius: 5px;
-    background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%);
-    border: 1.5px solid #1565c0;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.5);
-}
-.dc-3 { top: 0;   left: 0;   transform: rotate(-4deg); }
-.dc-2 { top: 3px; left: 3px; }
-.dc-1 { top: 6px; left: 6px; transform: rotate(2deg); }
-
-/* Motif dos de carte */
-.deck-card::after {
-    content: '';
-    position: absolute;
-    inset: 4px;
-    border-radius: 3px;
-    border: 1px solid rgba(255,255,255,0.1);
-    background: repeating-linear-gradient(
-        45deg,
-        rgba(255,255,255,0.03) 0px,
-        rgba(255,255,255,0.03) 2px,
-        transparent 2px,
-        transparent 6px
-    );
-}
-
-.ring-status {
-    font-family: 'Fira Mono', monospace;
-    font-size: 10px;
-    text-align: center;
-    white-space: nowrap;
-    color: rgba(255,255,255,0.6);
-    max-width: 90px;
-    line-height: 1.3;
-}
-.ring-status .rs-hash {
-    display: block;
     font-size: 8px;
-    opacity: 0.6;
-    word-break: break-all;
+    font-weight: 700;
+    line-height: 1;
 }
-.ring-status.rs-committed { color: #ffd700; }
-.ring-status.rs-verified  { color: #27ae60; }
-.ring-status.rs-error     { color: #e74c3c; }
-.ring-status.rs-computing { color: #ff9800; animation: blink 1s ease infinite; }
+
+.marker-d {
+    background: var(--accent);
+    color: #000;
+    box-shadow: 0 1px 4px var(--shadow-color);
+}
+
+.marker-sb {
+    background: var(--info);
+    color: #fff;
+}
+
+.marker-bb {
+    background: var(--danger);
+    color: #fff;
+}
+
+.marker-allin {
+    background: var(--danger);
+    color: #fff;
+    border-radius: 6px;
+    width: auto;
+    padding: 1px 6px;
+    font-size: 8px;
+    text-transform: uppercase;
+}
+
+/* ── Timer d'action avec barre de progression ────────────────────────────── */
+.action-timer-container {
+    position: absolute;
+    top: 65%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 200px;
+    z-index: 15;
+    display: none;
+}
+
+.action-timer-container.visible {
+    display: block;
+}
+
+.action-timer-bar {
+    height: 6px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.action-timer-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--success), var(--warning), var(--danger));
+    border-radius: 2px;
+    transition: width 1s linear;
+    width: 100%;
+}
+
+.action-timer-text {
+    text-align: center;
+    font-family: 'Fira Mono', monospace;
+    font-size: 12px;
+    color: var(--text-primary);
+    margin-top: 4px;
+}
+
+.action-timer-text.urgent {
+    color: var(--danger);
+    font-weight: bold;
+    animation: blink 0.5s infinite;
+}
 
 @keyframes blink {
     0%, 100% { opacity: 1; }
-    50%       { opacity: 0.4; }
+    50% { opacity: 0.5; }
 }
 
-/* ── Community cards ─────────────────────────────────────────────────── */
-
-.community-cards {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    min-height: 84px;
-    padding: 8px 12px;
-    background: rgba(0,0,0,0.25);
-    border-radius: 14px;
-    border: 1px solid rgba(255,255,255,0.05);
-}
-
-/* Carte community : TOUJOURS fond blanc */
-.community-card {
-    width: 56px;
-    height: 80px;
-    border-radius: 7px;
-    background: var(--card-face-bg);  /* blanc garanti */
-    border: 1px solid var(--card-border);
-    box-shadow: 0 3px 10px rgba(0,0,0,0.5);
-    position: relative;
-    animation: deal-card 0.3s ease-out both;
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.community-card.late-card {
-    margin-left: 6px;   /* séparateur visuel turn/river */
-}
-
-@keyframes deal-card {
-    from { transform: scale(0.5) translateY(-20px); opacity: 0; }
-    to   { transform: scale(1)   translateY(0);     opacity: 1; }
-}
-
-/* ── Intérieur de la carte (grande) ──────────────────────────────────── */
-
-/* Le fond de .card-face est hérité du parent .community-card (blanc) */
-.card-face {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    grid-template-areas:
-        "tl ."
-        ".  mid"
-        ".  br";
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: 1fr 1fr 1fr;
-    padding: 4px 5px;
-    font-family: 'Fira Mono', monospace;
-    font-weight: 700;
-    /* Pas de background ici — transparent pour laisser voir le blanc du parent */
-}
-
-.card-face.hearts,
-.card-face.diamonds { color: #c62828; }
-.card-face.clubs,
-.card-face.spades   { color: #1a1a1a; }
-
-.cf-tl {
-    grid-area: tl;
-    font-size: 13px;
-    line-height: 1.1;
-    align-self: start;
-}
-
-.cf-mid {
-    grid-area: mid;
-    font-size: 26px;
-    text-align: center;
-    align-self: center;
-    justify-self: center;
-    line-height: 1;
-    grid-column: 1 / -1;
-}
-
-.cf-br {
-    grid-area: br;
-    font-size: 13px;
-    line-height: 1.1;
-    align-self: end;
-    justify-self: end;
-    transform: rotate(180deg);
-}
-
-/* Dos de carte (fallback) */
-.card-back-face {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%);
-    border-radius: 7px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-.card-back-pattern {
-    inset: 5px;
-    position: absolute;
-    border-radius: 4px;
-    border: 1px solid rgba(255,255,255,0.15);
-    background: repeating-linear-gradient(
-        45deg,
-        rgba(255,255,255,0.04) 0, rgba(255,255,255,0.04) 3px,
-        transparent 3px, transparent 8px
-    );
-}
-
-/* ── Pot ─────────────────────────────────────────────────────────────── */
-
-.pot {
-    position: absolute;
-    bottom: 34%;
-    left: 50%;
-    transform: translateX(-50%);
-    font-family: 'Fira Mono', monospace;
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--gold);
-    text-shadow: 0 1px 4px rgba(0,0,0,0.7);
-    background: rgba(0,0,0,0.6);
-    padding: 5px 18px;
-    border-radius: 20px;
-    border: 1px solid rgba(255,215,0,0.3);
-    z-index: 11;
-    white-space: nowrap;
-}
-
-/* ════════════════════════════════════════════════════════════════════════
-   MES GRANDES CARTES (bas-centre, sous la table)
-   ════════════════════════════════════════════════════════════════════════ */
-
-.my-cards-display {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    margin-top: -30px;     /* Légère remontée sous la table */
-    z-index: 50;
-}
-
-.my-cards-label {
-    font-size: 11px;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 1px;
-}
-
-.my-cards-inner {
-    display: flex;
-    gap: 12px;
-}
-
-/* Grande carte personnelle */
-.my-card {
-    width: 88px;
-    height: 126px;
-    border-radius: 10px;
-    background: var(--card-face-bg);  /* blanc */
-    border: 2px solid var(--card-border);
-    box-shadow: 0 6px 20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.1);
-    position: relative;
-    overflow: hidden;
-    transition: transform 0.2s;
-}
-
-.my-card:hover { transform: translateY(-8px) scale(1.05); }
-
-/* Adapter la taille des symboles dans les grandes cartes */
-.my-card .card-face {
-    padding: 6px 8px;
-}
-.my-card .cf-tl { font-size: 16px; }
-.my-card .cf-mid { font-size: 42px; }
-.my-card .cf-br  { font-size: 16px; }
-
-/* ════════════════════════════════════════════════════════════════════════
-   PANEL D'ACTION
-   ════════════════════════════════════════════════════════════════════════ */
-
+/* ── Panneau d'actions ───────────────────────────────────────────────────── */
 .action-panel {
-    width: 100%;
-    max-width: 640px;
-    background: rgba(0,0,0,0.75);
-    border: 1px solid var(--border-color);
-    border-radius: 14px;
-    padding: 12px 16px;
-    margin-top: 8px;
-    backdrop-filter: blur(8px);
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--bg-secondary);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border-color);
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    z-index: 50;
 }
 
 .action-buttons {
     display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    justify-content: center;
-    margin-bottom: 10px;
+    gap: 10px;
 }
 
 .action-btn {
-    padding: 10px 20px;
+    padding: 10px 24px;
     border: none;
-    border-radius: 8px;
+    border-radius: 10px;
     font-family: 'Oswald', sans-serif;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    transition: transform 0.1s, filter 0.15s;
+    text-transform: uppercase;
     letter-spacing: 0.5px;
-}
-.action-btn:hover  { transform: translateY(-2px); filter: brightness(1.15); }
-.action-btn:active { transform: translateY(0); }
-
-.action-btn kbd {
-    font-size: 11px;
-    opacity: 0.7;
-    margin-left: 4px;
-    font-family: 'Fira Mono', monospace;
+    transition: transform var(--transition-fast), filter var(--transition-fast);
 }
 
-.btn-fold  { background: #c62828; color: #fff; }
-.btn-check { background: #2e7d32; color: #fff; }
-.btn-call  { background: #1565c0; color: #fff; }
-.btn-raise { background: #e65100; color: #fff; }
+.action-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    filter: brightness(1.15);
+}
+
+.action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.action-btn.fold { background: #616161; color: #fff; }
+.action-btn.check { background: var(--info); color: #fff; }
+.action-btn.call { background: var(--success); color: #fff; }
+.action-btn.raise { background: var(--accent); color: #1a1a1a; }
 
 .raise-slider {
     display: flex;
     align-items: center;
     gap: 10px;
-    flex-wrap: wrap;
-    justify-content: center;
-    padding: 8px 0;
-    border-top: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255, 255, 255, 0.05);
+    padding: 8px 14px;
+    border-radius: 10px;
 }
 
-.raise-label { font-size: 13px; color: var(--text-secondary); }
-
-#raiseAmount {
-    flex: 1;
-    min-width: 140px;
-    max-width: 280px;
+.raise-slider input[type="range"] {
+    width: 160px;
     accent-color: var(--accent);
-    cursor: pointer;
 }
 
 .raise-controls {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
-}
-
-#raiseValue {
     font-family: 'Fira Mono', monospace;
-    font-size: 16px;
-    color: var(--gold);
-    min-width: 70px;
-    text-align: right;
+    font-size: 14px;
+    color: var(--accent);
 }
 
-.btn-small {
-    padding: 5px 12px;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    font-family: 'Oswald', sans-serif;
+.player-info {
+    font-family: 'Fira Mono', monospace;
     font-size: 13px;
-    transition: filter 0.15s;
-}
-.btn-ok     { background: var(--ok);    color: #fff; }
-.btn-cancel { background: #555;         color: #ccc; }
-.btn-small:hover { filter: brightness(1.15); }
-
-.player-hud {
+    color: var(--text-secondary);
     display: flex;
-    justify-content: space-between;
+    gap: 16px;
     align-items: center;
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid rgba(255,255,255,0.07);
+}
+
+.player-info #playerChips {
+    color: var(--accent);
+    font-weight: 600;
 }
 
 .action-timer-display {
-    font-family: 'Fira Mono', monospace;
-    font-size: 15px;
     font-weight: 700;
+    font-size: 16px;
+    min-width: 80px;
+    text-align: center;
 }
 
-.player-chips-hud {
-    font-family: 'Fira Mono', monospace;
-    font-size: 14px;
-    color: var(--gold);
+/* ── Option affichage BB ─────────────────────────────────────────────────── */
+.stack-display-toggle {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 20;
 }
 
-/* ════════════════════════════════════════════════════════════════════════
-   BARRE D'OPTIONS
-   ════════════════════════════════════════════════════════════════════════ */
-
-.options-bar {
+.stack-display-toggle label {
     display: flex;
     align-items: center;
-    gap: 16px;
-    flex-wrap: wrap;
-    justify-content: center;
-    padding: 6px 12px;
-    background: rgba(0,0,0,0.4);
-    border-radius: 10px;
-    margin-top: 6px;
-    font-size: 13px;
+    gap: 6px;
+    font-size: 11px;
     color: var(--text-secondary);
-}
-
-.opt-toggle {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-}
-.opt-toggle input { cursor: pointer; accent-color: var(--accent); }
-
-.opt-theme {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-#themeSelect {
-    background: rgba(0,0,0,0.5);
-    color: var(--text-primary);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    padding: 3px 8px;
-    font-family: 'Oswald', sans-serif;
-    font-size: 13px;
     cursor: pointer;
 }
 
-.leave-btn {
-    background: rgba(196,28,28,0.2);
-    color: #ef9a9a;
-    border: 1px solid rgba(196,28,28,0.4);
-    border-radius: 8px;
-    padding: 5px 14px;
-    font-family: 'Oswald', sans-serif;
-    font-size: 13px;
-    cursor: pointer;
-    margin-left: auto;
-    transition: background 0.2s;
+.stack-display-toggle input {
+    accent-color: var(--accent);
 }
-.leave-btn:hover { background: rgba(196,28,28,0.4); color: #fff; }
 
-/* ════════════════════════════════════════════════════════════════════════
-   PANEL DROIT
-   ════════════════════════════════════════════════════════════════════════ */
-
-.right-panel {
-    width: 280px;
-    flex-shrink: 0;
+/* ── Panneau info (droite) ───────────────────────────────────────────────── */
+.info-panel {
+    flex: 1;
+    min-width: 280px;
+    max-width: 340px;
+    background: var(--bg-secondary);
+    backdrop-filter: blur(10px);
+    border-radius: 16px;
+    padding: 14px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding-top: 8px;
-    max-height: calc(100vh - 80px);
-}
-
-.gi-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--accent);
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--border-color);
-    margin-bottom: 6px;
-}
-
-/* ── Infos de jeu ────────────────────────────────────────────────────── */
-
-.game-info-panel {
-    background: var(--bg-secondary);
+    gap: 12px;
     border: 1px solid var(--border-color);
-    border-radius: 12px;
+    font-family: 'Oswald', sans-serif;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+}
+
+.game-info {
+    background: var(--bg-tertiary);
+    border-radius: 10px;
     padding: 12px;
 }
 
 .info-row {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    padding: 5px 0;
     font-size: 12px;
-    padding: 3px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
+    border-bottom: 1px solid var(--border-subtle);
 }
-.info-row:last-child { border-bottom: none; }
-.info-row .label { color: var(--text-secondary); }
-.info-row .value { color: #fff; font-family: 'Fira Mono', monospace; font-size: 11px; }
 
-/* ── Historique des mains ─────────────────────────────────────────────── */
+.info-row:last-child {
+    border-bottom: none;
+}
 
-.hand-history-panel {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    padding: 12px;
+.info-row .label {
+    opacity: 0.6;
+}
+
+.info-row .value {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+/* ── Historique des mains ────────────────────────────────────────────────── */
+.hand-history {
     flex: 1;
-    min-height: 0;
+    background: var(--bg-tertiary);
+    border-radius: 10px;
+    padding: 12px;
     display: flex;
     flex-direction: column;
+    min-height: 200px;
+    overflow: hidden;
+}
+
+.hand-history h3 {
+    font-size: 14px;
+    color: var(--accent);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .history-list {
-    overflow-y: auto;
     flex: 1;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255,215,0,0.3) transparent;
-}
-
-.hh-empty {
-    text-align: center;
-    color: var(--text-secondary);
-    font-size: 12px;
-    padding: 20px 0;
-    font-style: italic;
-}
-
-/* Entrée de main */
-.hh-hand {
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-    margin-bottom: 4px;
-}
-
-.hh-summary {
-    cursor: pointer;
-    padding: 5px 2px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--accent-light, var(--accent));
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    list-style: none;
-    user-select: none;
-}
-.hh-summary::-webkit-details-marker { display: none; }
-.hh-summary::before { content: '▸'; font-size: 10px; }
-details[open] .hh-summary::before { content: '▾'; }
-
-.hh-time   { color: var(--text-secondary); font-size: 10px; margin-left: auto; }
-.hh-blinds { color: var(--text-secondary); font-size: 10px; }
-
-.hh-community {
-    padding: 4px 6px;
-    font-size: 13px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 3px;
-}
-
-.hh-event {
-    padding: 2px 6px;
+    overflow-y: auto;
+    font-family: 'Fira Mono', monospace;
     font-size: 11px;
+}
+
+.history-entry {
+    padding: 8px;
+    border-bottom: 1px solid var(--border-subtle);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+}
+
+.history-entry:hover {
+    background: rgba(var(--accent-rgb), 0.1);
+}
+
+.history-entry:last-child {
+    border-bottom: none;
+}
+
+.history-hand-number {
+    color: var(--accent);
+    font-weight: bold;
+}
+
+.history-winner {
+    color: var(--success);
+}
+
+.history-pot {
     color: var(--text-secondary);
-    border-left: 2px solid rgba(255,255,255,0.08);
-    margin: 1px 0 1px 4px;
-}
-.hh-event .he-street { color: var(--accent); font-weight: 600; }
-.hh-event b { color: var(--text-primary); }
-
-.hh-winner {
-    padding: 4px 6px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--gold);
-    background: rgba(255,215,0,0.07);
-    border-radius: 4px;
-    margin: 4px 0;
 }
 
-/* ── Chat de table ────────────────────────────────────────────────────── */
+.history-cards {
+    margin-top: 4px;
+    font-size: 10px;
+}
 
+/* ── Chat de table ───────────────────────────────────────────────────────── */
 .table-chat {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    padding: 12px;
+    flex: 1;
     display: flex;
     flex-direction: column;
-    height: 220px;
+    background: var(--bg-tertiary);
+    border-radius: 10px;
+    overflow: hidden;
+    min-height: 150px;
 }
 
-.tchat-messages {
+.table-chat h3 {
+    padding: 8px 12px;
+    margin: 0;
+    font-size: 13px;
+    color: var(--accent);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.table-chat-messages {
     flex: 1;
     overflow-y: auto;
-    padding: 4px 2px;
-    font-size: 12px;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255,215,0,0.2) transparent;
+    padding: 8px;
+    font-size: 11px;
+    max-height: 150px;
 }
 
 .tchat-msg {
-    padding: 2px 4px;
-    margin: 2px 0;
-    word-break: break-word;
+    padding: 3px 0;
     line-height: 1.4;
 }
-.tchat-system { color: var(--text-secondary); font-style: italic; }
-.tchat-user   { color: var(--accent-light, var(--accent)); font-weight: 700; }
 
-.tchat-input {
-    display: flex;
-    gap: 6px;
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid rgba(255,255,255,0.07);
+.tchat-time {
+    color: var(--text-muted);
+    font-size: 10px;
 }
 
-#tableChatInput {
+.tchat-user {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.tchat-system {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.table-chat-input {
+    display: flex;
+    padding: 8px;
+    gap: 6px;
+    border-top: 1px solid var(--border-subtle);
+}
+
+.table-chat-input input {
     flex: 1;
-    background: rgba(0,0,0,0.4);
-    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-subtle);
     border-radius: 6px;
-    color: #fff;
-    padding: 5px 10px;
-    font-family: inherit;
+    padding: 6px 10px;
+    color: var(--text-primary);
     font-size: 12px;
 }
-#tableChatInput:focus { outline: none; border-color: var(--accent); }
-#tableChatInput::placeholder { color: rgba(255,255,255,0.3); }
 
-#tableChatSend {
+.table-chat-input input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.table-chat-input button {
     background: var(--accent);
     color: #000;
     border: none;
     border-radius: 6px;
-    padding: 5px 12px;
-    font-weight: 700;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+/* ── Bouton quitter ──────────────────────────────────────────────────────── */
+.leave-btn {
+    padding: 10px;
+    background: linear-gradient(135deg, var(--danger), #b71c1c);
+    color: white;
+    border: none;
+    border-radius: 10px;
     cursor: pointer;
     font-family: 'Oswald', sans-serif;
-    transition: filter 0.15s;
+    font-weight: 600;
+    font-size: 14px;
+    text-transform: uppercase;
 }
-#tableChatSend:hover { filter: brightness(1.15); }
-#tableChatSend:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* ════════════════════════════════════════════════════════════════════════
-   TOAST NOTIFICATIONS
-   ════════════════════════════════════════════════════════════════════════ */
+.leave-btn:hover {
+    filter: brightness(1.15);
+}
 
+/* ── Bannière spectateur ─────────────────────────────────────────────────── */
+.spectator-banner {
+    position: fixed;
+    top: 50px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.85);
+    color: var(--accent);
+    padding: 8px 24px;
+    border-radius: 24px;
+    font-size: 13px;
+    z-index: 100;
+    border: 1px solid var(--border-color);
+}
+
+/* ── Toast ───────────────────────────────────────────────────────────────── */
 .toast {
     position: fixed;
-    bottom: 24px;
-    left: 50%;
-    transform: translateX(-50%) translateY(80px);
-    background: rgba(0,0,0,0.9);
-    color: #fff;
-    padding: 10px 24px;
-    border-radius: 8px;
-    font-size: 14px;
-    font-family: 'Oswald', sans-serif;
-    pointer-events: none;
-    z-index: 9999;
-    transition: transform 0.3s ease, opacity 0.3s ease;
-    opacity: 0;
-    border: 1px solid rgba(255,255,255,0.1);
-    max-width: 340px;
-    text-align: center;
-}
-.toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
-.toast.success { border-color: var(--ok);     background: rgba(27,94,32,0.95); }
-.toast.error   { border-color: var(--danger); background: rgba(183,28,28,0.95); }
-.toast.info    { border-color: var(--accent); background: rgba(30,30,30,0.95); }
-
-/* ════════════════════════════════════════════════════════════════════════
-   RESPONSIVE
-   ════════════════════════════════════════════════════════════════════════ */
-
-@media (max-width: 1100px) {
-    .right-panel { width: 230px; }
-    .poker-table { width: 680px; height: 365px; border-radius: 183px; }
-    .table-wrapper { padding: 80px 120px 70px; }
-    .player-seat[data-seat="2"]  { left: -100px; }
-    .player-seat[data-seat="7"]  { right: -100px; }
+    bottom: 80px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.92);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 10px;
+    z-index: 200;
+    transform: translateX(400px);
+    transition: transform 0.3s;
+    font-size: 13px;
+    border-left: 3px solid var(--accent);
 }
 
-@media (max-width: 900px) {
-    .poker-room { flex-direction: column; }
-    .right-panel { width: 100%; flex-direction: row; flex-wrap: wrap; }
-    .game-info-panel,
-    .hand-history-panel,
-    .table-chat { flex: 1; min-width: 240px; }
-    .poker-table { width: 560px; height: 300px; border-radius: 150px; }
-    .table-wrapper { padding: 70px 110px 60px; }
-    .player-seat[data-seat="2"]  { left: -90px; }
-    .player-seat[data-seat="7"]  { right: -90px; }
+.toast.show { transform: translateX(0); }
+.toast.success { border-left-color: var(--success); }
+.toast.error { border-left-color: var(--danger); }
+.toast.info { border-left-color: var(--info); }
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 1200px) {
+    .poker-room {
+        flex-direction: column;
+    }
+    
+    .poker-table {
+        width: 100%;
+        max-width: 780px;
+        height: auto;
+        aspect-ratio: 1.86 / 1;
+        margin: 0 auto;
+    }
+    
+    .info-panel {
+        max-width: 100%;
+        flex-direction: row;
+        flex-wrap: wrap;
+        max-height: none;
+    }
+    
+    .action-panel {
+        padding: 8px 10px;
+    }
+}
+
+@media (max-width: 700px) {
+    .poker-table {
+        height: 280px;
+    }
+    
+    .community-cards .card {
+        width: 38px;
+        height: 54px;
+        font-size: 14px;
+    }
+    
+    .seat-avatar {
+        width: 36px;
+        height: 36px;
+        font-size: 16px;
+    }
+    
+    .seat-info {
+        font-size: 10px;
+        min-width: 70px;
+        padding: 4px 6px;
+    }
+    
+    .player-seat {
+        width: 75px;
+    }
+    
+    .action-btn {
+        padding: 8px 14px;
+        font-size: 12px;
+    }
+    
+    .my-card {
+        width: 50px;
+        height: 70px;
+        font-size: 20px;
+    }
 }

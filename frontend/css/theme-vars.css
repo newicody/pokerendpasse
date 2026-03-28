@@ -1,0 +1,173 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   theme-vars.css — Variables CSS centralisées pour tous les thèmes
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+    /* Couleurs de base (thème dark par défaut) */
+    --bg-primary: #0d1f0d;
+    --bg-secondary: rgba(0, 0, 0, 0.6);
+    --bg-tertiary: rgba(0, 0, 0, 0.4);
+    
+    /* Accent */
+    --accent: #ffd700;
+    --accent-light: #ffb347;
+    --accent-dark: #cc9900;
+    --accent-rgb: 255, 215, 0;
+    
+    /* Texte */
+    --text-primary: #ffffff;
+    --text-secondary: rgba(255, 255, 255, 0.7);
+    --text-muted: rgba(255, 255, 255, 0.5);
+    
+    /* Bordures */
+    --border-color: rgba(255, 215, 0, 0.3);
+    --border-subtle: rgba(255, 255, 255, 0.1);
+    
+    /* Table de poker */
+    --felt-green: #1b5e20;
+    --felt-dark: #0d3010;
+    --felt-light: #2e7d32;
+    --rail-brown: #5d3a1a;
+    --rail-dark: #3a2210;
+    
+    /* Cartes */
+    --card-bg: #f5f5f0;
+    --card-back: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%);
+    --card-back-border: #1565c0;
+    --card-red: #c62828;
+    --card-black: #1a1a1a;
+    --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    
+    /* États */
+    --success: #27ae60;
+    --danger: #e74c3c;
+    --warning: #ff9800;
+    --info: #3498db;
+    
+    /* Shadows */
+    --shadow-color: rgba(0, 0, 0, 0.5);
+    --shadow-strong: rgba(0, 0, 0, 0.7);
+    
+    /* Animations */
+    --transition-fast: 0.15s ease;
+    --transition-normal: 0.25s ease;
+    --transition-slow: 0.4s ease;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Thème Dark (défaut)
+   ═══════════════════════════════════════════════════════════════════════════ */
+body.theme-dark,
+body:not([class*="theme-"]) {
+    --bg-primary: #0d1f0d;
+    --bg-secondary: rgba(0, 0, 0, 0.6);
+    --bg-tertiary: rgba(0, 0, 0, 0.4);
+    --accent: #ffd700;
+    --accent-light: #ffb347;
+    --text-primary: #ffffff;
+    --text-secondary: rgba(255, 255, 255, 0.7);
+    --border-color: rgba(255, 215, 0, 0.3);
+    --felt-green: #1b5e20;
+    --felt-dark: #0d3010;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Thème Green Classic
+   ═══════════════════════════════════════════════════════════════════════════ */
+body.theme-green {
+    --bg-primary: #0a2a0a;
+    --bg-secondary: rgba(0, 40, 0, 0.7);
+    --bg-tertiary: rgba(0, 30, 0, 0.5);
+    --accent: #00e676;
+    --accent-light: #69f0ae;
+    --accent-dark: #00c853;
+    --accent-rgb: 0, 230, 118;
+    --text-primary: #e8f5e9;
+    --text-secondary: rgba(200, 255, 200, 0.7);
+    --border-color: rgba(0, 230, 118, 0.3);
+    --felt-green: #1b5e20;
+    --felt-dark: #0a3a0a;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Thème Neon
+   ═══════════════════════════════════════════════════════════════════════════ */
+body.theme-neon {
+    --bg-primary: #0a0015;
+    --bg-secondary: rgba(20, 0, 50, 0.8);
+    --bg-tertiary: rgba(15, 0, 40, 0.6);
+    --accent: #e040fb;
+    --accent-light: #ff80ab;
+    --accent-dark: #aa00ff;
+    --accent-rgb: 224, 64, 251;
+    --text-primary: #f3e5f5;
+    --text-secondary: rgba(220, 190, 255, 0.7);
+    --border-color: rgba(224, 64, 251, 0.4);
+    --felt-green: #1a0033;
+    --felt-dark: #0d001a;
+    --card-back: linear-gradient(135deg, #4a0072 0%, #7c4dff 100%);
+    --card-back-border: #aa00ff;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Thème Royal Blue
+   ═══════════════════════════════════════════════════════════════════════════ */
+body.theme-royal {
+    --bg-primary: #0a0f2e;
+    --bg-secondary: rgba(0, 10, 50, 0.7);
+    --bg-tertiary: rgba(0, 10, 40, 0.5);
+    --accent: #42a5f5;
+    --accent-light: #80d8ff;
+    --accent-dark: #1976d2;
+    --accent-rgb: 66, 165, 245;
+    --text-primary: #e3f2fd;
+    --text-secondary: rgba(180, 210, 255, 0.7);
+    --border-color: rgba(66, 165, 245, 0.3);
+    --felt-green: #0d2060;
+    --felt-dark: #05103a;
+    --card-back: linear-gradient(135deg, #0d47a1 0%, #1565c0 100%);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Thème Crimson
+   ═══════════════════════════════════════════════════════════════════════════ */
+body.theme-crimson {
+    --bg-primary: #1a0000;
+    --bg-secondary: rgba(40, 0, 0, 0.7);
+    --bg-tertiary: rgba(30, 0, 0, 0.5);
+    --accent: #ef5350;
+    --accent-light: #ff8a80;
+    --accent-dark: #c62828;
+    --accent-rgb: 239, 83, 80;
+    --text-primary: #ffebee;
+    --text-secondary: rgba(255, 200, 200, 0.7);
+    --border-color: rgba(239, 83, 80, 0.3);
+    --felt-green: #5d0000;
+    --felt-dark: #3a0000;
+    --card-back: linear-gradient(135deg, #b71c1c 0%, #c62828 100%);
+    --card-back-border: #ef5350;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Thème Light
+   ═══════════════════════════════════════════════════════════════════════════ */
+body.theme-light {
+    --bg-primary: #f5f5f5;
+    --bg-secondary: rgba(255, 255, 255, 0.9);
+    --bg-tertiary: rgba(255, 255, 255, 0.7);
+    --accent: #1565c0;
+    --accent-light: #42a5f5;
+    --accent-dark: #0d47a1;
+    --accent-rgb: 21, 101, 192;
+    --text-primary: #212121;
+    --text-secondary: rgba(0, 0, 0, 0.6);
+    --text-muted: rgba(0, 0, 0, 0.4);
+    --border-color: rgba(21, 101, 192, 0.3);
+    --border-subtle: rgba(0, 0, 0, 0.1);
+    --felt-green: #2e7d32;
+    --felt-dark: #1b5e20;
+    --felt-light: #4caf50;
+    --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    --shadow-color: rgba(0, 0, 0, 0.2);
+    --shadow-strong: rgba(0, 0, 0, 0.3);
+}
