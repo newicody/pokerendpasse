@@ -1,14 +1,29 @@
-# backend/models.py - Version complète avec tous les modèles
+# backend/models.py
+"""
+Modèles Pydantic — PokerEndPasse
+=================================
+Pydantic v2 avec field_validator (pas @validator v1).
+Support Hold'em + PLO.
+"""
+
 from enum import Enum
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 import uuid
 
-# ==================== ENUMS ====================
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ENUMS
+# ══════════════════════════════════════════════════════════════════════════════
+
 class GameType(str, Enum):
     TOURNAMENT = "tournament"
     SIT_AND_GO = "sit_and_go"
+
+class GameVariant(str, Enum):
+    HOLDEM = "holdem"
+    PLO = "plo"
 
 class GameStatus(str, Enum):
     WAITING = "waiting"
@@ -41,11 +56,15 @@ class ActionType(str, Enum):
 class TournamentStatus(str, Enum):
     REGISTRATION = "registration"
     IN_PROGRESS = "in_progress"
+    PAUSED = "paused"
     FINISHED = "finished"
     CANCELLED = "cancelled"
 
-# ==================== USER MODELS ====================
-# backend/models.py - Modifier User
+
+# ══════════════════════════════════════════════════════════════════════════════
+# USER
+# ══════════════════════════════════════════════════════════════════════════════
+
 class User(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     username: str
@@ -55,16 +74,19 @@ class User(BaseModel):
     status: str = "active"
     created_at: datetime = Field(default_factory=datetime.utcnow)
     last_active: datetime = Field(default_factory=datetime.utcnow)
-    
+
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
-        if 'created_at' in data and data['created_at']:
-            data['created_at'] = data['created_at'].isoformat() if hasattr(data['created_at'], 'isoformat') else str(data['created_at'])
-        if 'last_active' in data and data['last_active']:
-            data['last_active'] = data['last_active'].isoformat() if hasattr(data['last_active'], 'isoformat') else str(data['last_active'])
+        for key in ('created_at', 'last_active'):
+            if key in data and data[key] and hasattr(data[key], 'isoformat'):
+                data[key] = data[key].isoformat()
         return data
 
-# ==================== TABLE MODELS ====================
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TABLE
+# ══════════════════════════════════════════════════════════════════════════════
+
 class TablePlayer(BaseModel):
     user_id: str
     username: str
@@ -78,35 +100,37 @@ class TablePlayer(BaseModel):
     is_small_blind: bool = False
     is_big_blind: bool = False
     sat_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
-        if 'sat_at' in data and data['sat_at']:
-            data['sat_at'] = data['sat_at'].isoformat() if hasattr(data['sat_at'], 'isoformat') else str(data['sat_at'])
+        if 'sat_at' in data and data['sat_at'] and hasattr(data['sat_at'], 'isoformat'):
+            data['sat_at'] = data['sat_at'].isoformat()
         if 'status' in data and hasattr(data['status'], 'value'):
             data['status'] = data['status'].value
         return data
+
 
 class Table(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
     game_type: GameType = GameType.TOURNAMENT
+    game_variant: GameVariant = GameVariant.HOLDEM
     tournament_id: Optional[str] = None
     max_players: int = 9
     status: TableStatus = TableStatus.WAITING
     players: List[TablePlayer] = []
     spectators: List[str] = []
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
-        if 'created_at' in data and data['created_at']:
-            data['created_at'] = data['created_at'].isoformat() if hasattr(data['created_at'], 'isoformat') else str(data['created_at'])
-        if 'status' in data and hasattr(data['status'], 'value'):
-            data['status'] = data['status'].value
-        if 'game_type' in data and hasattr(data['game_type'], 'value'):
-            data['game_type'] = data['game_type'].value
+        if 'created_at' in data and data['created_at'] and hasattr(data['created_at'], 'isoformat'):
+            data['created_at'] = data['created_at'].isoformat()
+        for key in ('status', 'game_type', 'game_variant'):
+            if key in data and hasattr(data[key], 'value'):
+                data[key] = data[key].value
         return data
+
 
 class GameState(BaseModel):
     table_id: str
@@ -123,14 +147,18 @@ class GameState(BaseModel):
     last_action: Optional[Dict[str, Any]] = None
     min_raise: int = 10
     time_bank: int = 30
-    
+
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
         if 'status' in data and hasattr(data['status'], 'value'):
             data['status'] = data['status'].value
         return data
 
-# ==================== TOURNAMENT MODELS ====================
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TOURNAMENT
+# ══════════════════════════════════════════════════════════════════════════════
+
 class TournamentPlayer(BaseModel):
     user_id: str
     username: str
@@ -142,6 +170,7 @@ class TournamentPlayer(BaseModel):
     eliminated_rank: int = 0
     registered_at: datetime = Field(default_factory=datetime.utcnow)
 
+
 class Tournament(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
@@ -152,6 +181,7 @@ class Tournament(BaseModel):
     max_players: int = 100
     min_players_to_start: int = 4
     status: TournamentStatus = TournamentStatus.REGISTRATION
+    game_variant: GameVariant = GameVariant.HOLDEM
     players: List[TournamentPlayer] = []
     tables: List[str] = []
     winners: List[Dict] = []
@@ -159,7 +189,11 @@ class Tournament(BaseModel):
     current_level: int = 0
     blind_structure: List[Dict] = Field(default_factory=list)
 
-# ==================== API REQUEST MODELS ====================
+
+# ══════════════════════════════════════════════════════════════════════════════
+# API REQUEST MODELS
+# ══════════════════════════════════════════════════════════════════════════════
+
 class CreateTableRequest(BaseModel):
     name: str
     tournament_id: str
@@ -178,7 +212,9 @@ class CreateUserRequest(BaseModel):
     username: str
     email: Optional[str] = None
 
-# ==================== AUTH MODELS ====================
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -197,9 +233,9 @@ class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
 
-# ==================== TOURNAMENT API MODELS ====================
-# backend/models.py - Modifier CreateTournamentRequest
-# backend/models.py - Modifier CreateTournamentRequest
+
+# ── Tournament API ────────────────────────────────────────────────────────────
+
 class CreateTournamentRequest(BaseModel):
     name: str
     description: Optional[str] = None
@@ -210,9 +246,10 @@ class CreateTournamentRequest(BaseModel):
     min_players_to_start: int = 4
     prize_pool: int = 0
     itm_percentage: float = 10.0
+    game_variant: GameVariant = GameVariant.HOLDEM
     blind_structure: Optional[List[Dict]] = None
-    
-    @validator('registration_start', 'registration_end', 'start_time')
+
+    @field_validator('registration_start', 'registration_end', 'start_time', mode='before')
     @classmethod
     def parse_datetime(cls, value):
         if isinstance(value, str):
@@ -221,6 +258,8 @@ class CreateTournamentRequest(BaseModel):
         if hasattr(value, 'tzinfo') and value.tzinfo is not None:
             return value.replace(tzinfo=None)
         return value
+
+
 class UpdateTournamentRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
@@ -231,17 +270,41 @@ class UpdateTournamentRequest(BaseModel):
     min_players_to_start: Optional[int] = None
     blind_structure: Optional[List[Dict]] = None
 
+    @field_validator('registration_start', 'registration_end', 'start_time', mode='before')
+    @classmethod
+    def parse_datetime(cls, value):
+        if value is None:
+            return value
+        if isinstance(value, str):
+            dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+            return dt.replace(tzinfo=None)
+        if hasattr(value, 'tzinfo') and value.tzinfo is not None:
+            return value.replace(tzinfo=None)
+        return value
+
+
 class RegisterTournamentRequest(BaseModel):
     user_id: str
 
-# ==================== LOBBY MODELS ====================
+
+# ── Admin ─────────────────────────────────────────────────────────────────────
+
+class AdminActionRequest(BaseModel):
+    """Actions admin : pause, exclude, mute"""
+    user_id: Optional[str] = None
+    reason: Optional[str] = None
+    duration_minutes: Optional[int] = None
+
+
+# ── Lobby ─────────────────────────────────────────────────────────────────────
+
 class LobbyInfo(BaseModel):
     tournaments: List[Tournament]
     active_players: int
     total_players: int
     total_tables: int
 
-# backend/models.py - Ajouter ce modèle
+
 class TournamentInfo(BaseModel):
     id: str
     name: str
@@ -252,6 +315,7 @@ class TournamentInfo(BaseModel):
     max_players: int
     min_players_to_start: int
     status: TournamentStatus
+    game_variant: GameVariant = GameVariant.HOLDEM
     players_count: int
     total_players: int
     registered_players: List[Dict]
@@ -263,22 +327,3 @@ class TournamentInfo(BaseModel):
     winners: List[Dict]
     time_until_start: Optional[int]
     can_register: bool
-
-# backend/models.py - Supprimer les champs chips
-class User(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    username: str
-    email: Optional[str] = None
-    avatar: Optional[str] = None
-    is_admin: bool = False
-    status: str = "active"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    last_active: datetime = Field(default_factory=datetime.utcnow)
-    
-    def model_dump(self, **kwargs):
-        data = super().model_dump(**kwargs)
-        if 'created_at' in data and data['created_at']:
-            data['created_at'] = data['created_at'].isoformat() if hasattr(data['created_at'], 'isoformat') else str(data['created_at'])
-        if 'last_active' in data and data['last_active']:
-            data['last_active'] = data['last_active'].isoformat() if hasattr(data['last_active'], 'isoformat') else str(data['last_active'])
-        return data

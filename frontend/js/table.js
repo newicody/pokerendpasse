@@ -1,89 +1,46 @@
 /**
- * table.js — Poker Table Controller
- * Version corrigée avec:
- * - Vérification du deck (commit/reveal)
- * - Gestion du pong pour heartbeat serveur
- * - Meilleure synchronisation avec le backend
- * - Timer corrigé avec action_timeout_total
- * - Historique des mains amélioré
+ * table.js — Logique principale de la table de poker
+ * Support Hold'em + PLO, quick bets, timer, thèmes
  */
-'use strict';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// État global
+// Globals
 // ══════════════════════════════════════════════════════════════════════════════
-let ws = null;
-let gameState = null;
-let currentUser = null;
-let isSpectator = false;
-let reconnectTimer = null;
-let reconnectAttempts = 0;
-let showStacksInBB = false;
-let lastHandNumber = 0;
-
-// Deck verification
-let deckCommitments = {};  // {hand_round: commitment_hash}
-let deckReveals = {};      // {hand_round: {seed, deck_order, hash}}
-let deckStatus = 'unknown'; // 'unknown', 'committed', 'verified', 'error'
-
 const tableId = window.tableId;
-const tableName = window.tableName;
+let ws = null;
+let currentUser = null;
+let gameState = null;
+let isSpectator = false;
+let showStacksInBB = false;
+let reconnectAttempts = 0;
+let reconnectTimer = null;
+let currentQuickBets = [];
+
+const $ = (id) => document.getElementById(id);
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Initialisation
+// Init
 // ══════════════════════════════════════════════════════════════════════════════
 async function init() {
     await loadUser();
-    
-    const params = new URLSearchParams(location.search);
-    isSpectator = params.get('spectate') === 'true' || !currentUser;
-    
-    if (isSpectator) {
-        hide('actionPanel');
-        show('spectatorBanner');
-    }
-    
-    // Charger les préférences
     loadPreferences();
-    
-    // Initialiser l'UI
-    $('tableName').textContent = tableName || 'Table';
-    renderSeats([]);
-    setupDeckIndicator();
-    
-    // Charger l'historique
-    if (window.HandHistoryModule) {
-        HandHistoryModule.loadFromStorage(tableId);
-        HandHistoryModule.updateDisplay($('historyList'));
-    }
-    
-    // Connexion WebSocket
+    setupActions();
+    setupQuickBets();
+    setupChat();
+    setupThemeModal();
+    setupKeyboardShortcuts();
     connectWS();
-    
-    // Événements
-    setupEvents();
-    setupTableChat();
-    loadTournamentInfo();
-    
-    // Appliquer le thème
-    if (window.ThemeManager) {
-        ThemeManager.load();
-    }
+    if (typeof SoundManager !== 'undefined') SoundManager.init();
 }
 
 async function loadUser() {
     try {
-        const response = await fetch('/api/auth/me');
-        if (response.ok) {
-            const data = await response.json();
-            if (data?.user?.id) {
-                currentUser = data.user;
-                return;
-            }
+        const resp = await fetch('/api/auth/me');
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data?.user?.id) { currentUser = data.user; return; }
         }
-    } catch (e) {
-        console.error('Failed to load user:', e);
-    }
+    } catch (e) { console.error('Load user:', e); }
     currentUser = null;
 }
 
@@ -91,24 +48,22 @@ function loadPreferences() {
     try {
         const prefs = JSON.parse(localStorage.getItem('poker_table_prefs') || '{}');
         showStacksInBB = prefs.showStacksInBB || false;
-        
         const toggle = $('stackDisplayToggle');
         if (toggle) {
             toggle.checked = showStacksInBB;
+            toggle.addEventListener('change', () => {
+                showStacksInBB = toggle.checked;
+                savePreferences();
+                if (gameState) render(gameState);
+            });
         }
-    } catch (e) {
-        // Ignorer
-    }
+    } catch (e) {}
 }
 
 function savePreferences() {
     try {
-        localStorage.setItem('poker_table_prefs', JSON.stringify({
-            showStacksInBB
-        }));
-    } catch (e) {
-        // Ignorer
-    }
+        localStorage.setItem('poker_table_prefs', JSON.stringify({ showStacksInBB }));
+    } catch (e) {}
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -116,877 +71,504 @@ function savePreferences() {
 // ══════════════════════════════════════════════════════════════════════════════
 function connectWS() {
     if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
-    
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const userId = currentUser?.id || 'spectator';
-    
     ws = new WebSocket(`${proto}//${location.host}/ws/${tableId}/${userId}`);
-    
+
     ws.onopen = () => {
         reconnectAttempts = 0;
         if (!isSpectator) toast('Connecté', 'success');
     };
-    
     ws.onmessage = (e) => {
-        try {
-            onMessage(JSON.parse(e.data));
-        } catch (err) {
-            console.error('WS message error:', err);
-        }
+        try { onMessage(JSON.parse(e.data)); } catch (err) { console.error('WS:', err); }
     };
-    
     ws.onclose = () => {
         if (!isSpectator) toast('Déconnecté', 'error');
         reconnect();
     };
-    
     ws.onerror = () => {};
 }
 
 function reconnect() {
     if (reconnectTimer) clearTimeout(reconnectTimer);
-    if (reconnectAttempts >= 10) {
-        toast('Connexion perdue', 'error');
-        return;
-    }
+    if (reconnectAttempts >= 10) { toast('Connexion perdue', 'error'); return; }
     reconnectTimer = setTimeout(connectWS, Math.min(1000 * Math.pow(2, reconnectAttempts++), 30000));
 }
 
 function sendWS(data) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(data));
-    }
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
 }
 
 function onMessage(msg) {
     switch (msg.type) {
         case 'game_update':
         case 'game_state':
-            render(msg.data || msg);
+            if (msg.is_spectator !== undefined) isSpectator = msg.is_spectator;
+            gameState = msg.data || msg;
+            if (msg.quick_bets) currentQuickBets = msg.quick_bets;
+            render(gameState);
             break;
-            
-        case 'connected':
-            console.log('Connected as', msg.user_id);
+        case 'hole_cards':
+            // Per-player hole cards (sécurité)
+            if (gameState) {
+                const me = gameState.players?.find(p => p.user_id === currentUser?.id);
+                if (me) me.hole_cards = msg.cards;
+                updateMyCards();
+            }
             break;
-            
-        case 'reconnected':
-            toast('Reconnecté!', 'success');
+        case 'community_cards':
+            if (gameState) gameState.community_cards = msg.cards;
+            updateCommunityCards(msg.cards);
+            if (typeof SoundManager !== 'undefined') SoundManager.play('flip');
             break;
-            
-        case 'tournament_level_change':
-        case 'blind_level_change':
-            toast(`Niveau ${msg.level}: ${msg.small_blind}/${msg.big_blind}`, 'info');
+        case 'player_action':
+            if (typeof SoundManager !== 'undefined') {
+                if (['call', 'raise', 'all-in'].includes(msg.action)) SoundManager.play('bet');
+            }
+            toast(`${msg.username || msg.user_id}: ${msg.action} ${msg.amount ? msg.amount : ''}`, 'info');
             break;
-            
-        case 'tournament_player_eliminated':
-        case 'player_eliminated':
-            toast(`${msg.username || '?'} éliminé (#${msg.rank})`, 'info');
-            loadTournamentInfo();
-            break;
-            
-        case 'tournament_started':
-            toast(`Tournoi démarré! ${msg.players_count} joueurs`, 'success');
-            break;
-            
-        case 'tournament_finished':
-            toast(`Tournoi terminé! Gagnant: ${msg.winners?.[0]?.username || '?'}`, 'success');
-            break;
-            
-        case 'table_chat':
-            addTableChat(msg);
-            break;
-            
-        case 'deck_commit':
-            handleDeckCommit(msg);
-            break;
-            
-        case 'deck_reveal':
-            handleDeckReveal(msg);
-            break;
-            
         case 'hand_result':
             handleHandResult(msg);
             break;
-            
+        case 'deck_commitment':
+            if ($('deckStatus')) $('deckStatus').textContent = '🔒 Committed';
+            break;
+        case 'deck_reveal':
+            if ($('deckStatus')) $('deckStatus').textContent = '✅ Verified';
+            break;
+        case 'connected': break;
+        case 'reconnected': toast('Reconnecté!', 'success'); break;
+        case 'tournament_level_change':
+            toast(`Niveau ${msg.level}: ${msg.small_blind}/${msg.big_blind}`, 'info');
+            break;
+        case 'tournament_player_eliminated':
+            toast(`${msg.username || '?'} éliminé (#${msg.rank})`, 'info');
+            break;
+        case 'table_chat':
+            appendChatMessage(msg.username, msg.message);
+            break;
+        case 'ping':
+            sendWS({ type: 'pong' });
+            break;
         case 'error':
             toast(msg.message || 'Erreur', 'error');
             break;
-            
-        case 'ping':
-            // Répondre au ping du serveur
-            sendWS({ type: 'pong' });
-            break;
-            
-        case 'pong':
-            // Réponse à notre ping (ignoré)
-            break;
     }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Deck Verification (SRA)
-// ══════════════════════════════════════════════════════════════════════════════
-function handleDeckCommit(msg) {
-    const { round, commitment } = msg;
-    deckCommitments[round] = commitment;
-    deckStatus = 'committed';
-    updateDeckIndicator();
-    console.log(`[Deck] Hand #${round} committed: ${commitment.substring(0, 16)}...`);
-}
-
-function handleDeckReveal(msg) {
-    const { round, seed, deck_order, commitment } = msg;
-    deckReveals[round] = { seed, deck_order, commitment };
-    
-    // Vérifier l'intégrité
-    const storedCommitment = deckCommitments[round];
-    if (storedCommitment) {
-        verifyDeckCommitment(seed, deck_order, storedCommitment).then(isValid => {
-            deckStatus = isValid ? 'verified' : 'error';
-            
-            if (!isValid) {
-                console.error(`[Deck] VERIFICATION FAILED for hand #${round}!`);
-                toast('⚠️ Vérification du deck échouée!', 'error');
-            } else {
-                console.log(`[Deck] Hand #${round} verified ✓`);
-            }
-            
-            updateDeckIndicator();
-        });
-    } else {
-        // Pas de commitment stocké (peut arriver si on rejoint en cours)
-        deckStatus = 'verified';
-        updateDeckIndicator();
-    }
-    
-    // Nettoyer les vieux commits (garder 10 derniers)
-    const rounds = Object.keys(deckCommitments).map(Number).sort((a, b) => a - b);
-    while (rounds.length > 10) {
-        const oldRound = rounds.shift();
-        delete deckCommitments[oldRound];
-        delete deckReveals[oldRound];
-    }
-}
-
-async function verifyDeckCommitment(seed, deckOrder, expectedHash) {
-    /**
-     * Vérifie que SHA256(seed:deck) == expectedHash
-     * Utilise SubtleCrypto si disponible, sinon confiance
-     */
-    try {
-        if (window.crypto && window.crypto.subtle) {
-            const deckStr = deckOrder.join(',');
-            const data = new TextEncoder().encode(`${seed}:${deckStr}`);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-            return hashHex === expectedHash;
-        }
-    } catch (e) {
-        console.warn('Crypto verification unavailable:', e);
-    }
-    
-    // Fallback: trust server (mais log)
-    console.log('[Deck] Client-side verification not available, trusting server');
-    return true;
-}
-
-function handleHandResult(msg) {
-    const { hand, winner, winner_id, pot, board, hand_type, winning_cards } = msg;
-    
-    // Mettre à jour l'historique
-    if (window.HandHistoryModule) {
-        const myResult = winner_id === currentUser?.id ? 'win' : 'lose';
-        HandHistoryModule.endHand(
-            { username: winner, user_id: winner_id },
-            hand_type,
-            pot,
-            myResult,
-            winning_cards
-        );
-        HandHistoryModule.updateDisplay($('historyList'));
-        HandHistoryModule.saveToStorage(tableId);
-    }
-    
-    // Toast
-    if (winner) {
-        const isMe = winner_id === currentUser?.id;
-        const icon = isMe ? '🎉' : '🏆';
-        toast(`${icon} ${winner} gagne ${formatStack(pot)}${hand_type ? ` (${hand_type})` : ''}`, isMe ? 'success' : 'info');
-    }
-}
-
-function setupDeckIndicator() {
-    const indicator = $('deckIndicator');
-    if (!indicator) return;
-    
-    indicator.innerHTML = `
-        <div class="deck-icon">🎴</div>
-        <div class="deck-status" id="deckStatusText">En attente</div>
-    `;
-    
-    indicator.addEventListener('click', () => {
-        showDeckVerificationInfo();
-    });
-}
-
-function updateDeckIndicator() {
-    const statusEl = $('deckStatusText');
-    const indicator = $('deckIndicator');
-    if (!statusEl || !indicator) return;
-    
-    indicator.classList.remove('status-unknown', 'status-committed', 'status-verified', 'status-error');
-    
-    switch (deckStatus) {
-        case 'committed':
-            statusEl.textContent = 'Engagé';
-            indicator.classList.add('status-committed');
-            break;
-        case 'verified':
-            statusEl.textContent = 'Vérifié ✓';
-            indicator.classList.add('status-verified');
-            break;
-        case 'error':
-            statusEl.textContent = 'Erreur!';
-            indicator.classList.add('status-error');
-            break;
-        default:
-            statusEl.textContent = 'En attente';
-            indicator.classList.add('status-unknown');
-    }
-}
-
-function showDeckVerificationInfo() {
-    const lastRound = Math.max(...Object.keys(deckCommitments).map(Number), 0);
-    const commit = deckCommitments[lastRound];
-    const reveal = deckReveals[lastRound];
-    
-    let info = `<h3>🔐 Vérification du Deck</h3>
-        <p><strong>Main actuelle:</strong> #${gameState?.round || '?'}</p>
-        <p><strong>Status:</strong> ${deckStatus}</p>`;
-    
-    if (commit) {
-        info += `<p><strong>Commitment:</strong><br><code>${commit.substring(0, 32)}...</code></p>`;
-    }
-    
-    if (reveal) {
-        info += `<p><strong>Seed révélé:</strong><br><code>${reveal.seed.substring(0, 32)}...</code></p>`;
-    }
-    
-    info += `<p class="deck-info-note">Le serveur s'engage sur l'ordre du deck AVANT de distribuer, 
-        puis révèle le seed après la main. Cela garantit qu'il ne peut pas tricher.</p>`;
-    
-    // Afficher dans une modal simple
-    const modal = document.createElement('div');
-    modal.className = 'deck-info-modal';
-    modal.innerHTML = `
-        <div class="deck-info-content">
-            ${info}
-            <button onclick="this.closest('.deck-info-modal').remove()">Fermer</button>
-        </div>
-    `;
-    document.body.appendChild(modal);
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// Rendu principal
+// Render
 // ══════════════════════════════════════════════════════════════════════════════
 function render(state) {
-    gameState = state;
     if (!state) return;
-    
-    // Nouvelle main?
-    if (state.round && state.round !== lastHandNumber) {
-        lastHandNumber = state.round;
-        if (window.HandHistoryModule) {
-            const myPlayer = findMyPlayer(state.players);
-            HandHistoryModule.startHand(state.round, state.players, myPlayer?.hole_cards || []);
-        }
-    }
-    
-    // Pot
-    $('pot').innerHTML = `<span class="pot-icon">💰</span> Pot: ${formatStack(state.pot || 0)}`;
-    
-    // Cartes communes - afficher uniquement celles distribuées
-    if (window.CardsModule) {
-        CardsModule.updateCommunityCards($('communityCards'), state.community_cards);
-        if (window.HandHistoryModule) {
-            HandHistoryModule.updateCommunityCards(state.community_cards);
-        }
-    } else {
-        updateCommunityCardsLegacy(state.community_cards);
-    }
-    
-    // Joueurs et mises
-    renderSeats(state.players || []);
-    renderBets(state.players || []);
-    
-    // Mes cartes en grand
-    const myPlayer = findMyPlayer(state.players);
-    updateMyCardsDisplay(myPlayer);
-    
-    // Informations de jeu
+    gameState = state;
+
+    renderPlayers(state);
+    updateCommunityCards(state.community_cards || []);
+    updatePot(state.pot || 0);
     updateGameInfo(state);
-    
-    // Timer d'action
+    updateActions(state);
+    updateMyCards();
     updateActionTimer(state);
-    
-    // Actions disponibles
-    if (!isSpectator && currentUser) {
-        const isMyTurn = state.current_actor === currentUser.id && state.status === 'playing';
-        updateActions(isMyTurn, state);
-    }
+    updateQuickBetsUI(state);
+
+    // Spectateur
+    const banner = $('spectatorBanner');
+    if (banner) banner.style.display = isSpectator ? 'block' : 'none';
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Rendu des sièges (joueur centré en bas)
-// ══════════════════════════════════════════════════════════════════════════════
-function renderSeats(players) {
+function renderPlayers(state) {
     const container = $('playersContainer');
     if (!container) return;
-    
     container.innerHTML = '';
-    
-    const maxPlayers = gameState?.max_players || 9;
-    const myPosition = findMyPosition(players);
-    
-    // Créer tous les sièges
-    for (let i = 0; i < maxPlayers; i++) {
-        // Calculer la position relative pour centrer le joueur en bas
-        const relativePos = getRelativePosition(i, myPosition, maxPlayers);
-        const player = players.find(p => p.position === i);
-        
-        const seatEl = document.createElement('div');
-        seatEl.className = 'player-seat';
-        seatEl.setAttribute('data-seat', relativePos);
-        
-        if (player) {
-            const isActive = player.status === 'active' || player.status === 'all_in';
-            const isFolded = player.status === 'folded';
-            const isDisconnected = player.status === 'disconnected';
-            const isCurrentActor = gameState?.current_actor === player.user_id;
-            const isMe = currentUser && player.user_id === currentUser.id;
-            
-            if (isFolded) seatEl.classList.add('folded');
-            if (isDisconnected) seatEl.classList.add('disconnected');
-            if (isCurrentActor) seatEl.classList.add('active-turn');
-            if (isMe) seatEl.classList.add('is-me');
-            
-            seatEl.innerHTML = renderPlayerSeat(player, isActive, isMe);
-        } else {
-            seatEl.classList.add('empty');
-            seatEl.innerHTML = renderEmptySeat(i);
-        }
-        
-        container.appendChild(seatEl);
-    }
-}
 
-function getRelativePosition(absolutePos, myPosition, maxPlayers) {
-    if (myPosition === -1 || isSpectator) {
-        // Pas de joueur actuel ou spectateur: garder les positions absolues
-        return absolutePos;
-    }
-    
-    // Calculer la position relative pour que myPosition soit en 0 (bas)
-    let relative = (absolutePos - myPosition + maxPlayers) % maxPlayers;
-    return relative;
-}
+    const players = state.players || [];
+    const positions = getPositions(players.length, state.max_players || 9);
 
-function findMyPosition(players) {
-    if (!currentUser || !players) return -1;
-    const myPlayer = players.find(p => p.user_id === currentUser.id);
-    return myPlayer ? myPlayer.position : -1;
-}
+    players.forEach((p, i) => {
+        const el = document.createElement('div');
+        el.className = `player-seat ${p.status || ''} ${p.user_id === state.current_actor ? 'active-player' : ''}`;
+        const pos = positions[i] || { top: '50%', left: '50%' };
+        el.style.top = pos.top;
+        el.style.left = pos.left;
 
-function findMyPlayer(players) {
-    if (!currentUser || !players) return null;
-    return players.find(p => p.user_id === currentUser.id);
-}
+        const stack = formatStack(p.chips || p.stack || 0);
+        const betDisplay = p.current_bet > 0 ? `<div class="player-bet-chip">${p.current_bet}</div>` : '';
+        const roleTag = p.is_dealer ? '<span class="role-tag dealer">D</span>' :
+                        p.is_small_blind ? '<span class="role-tag sb">SB</span>' :
+                        p.is_big_blind ? '<span class="role-tag bb">BB</span>' : '';
 
-function renderPlayerSeat(player, isActive, isMe) {
-    const avatar = player.avatar && player.avatar !== 'default'
-        ? `<img src="/uploads/avatars/${player.avatar}" alt="${esc(player.username)}">`
-        : player.username.charAt(0).toUpperCase();
-    
-    const stack = formatStack(player.chips || player.stack || 0);
-    
-    // Markers
-    let markers = '';
-    if (player.is_dealer) markers += '<span class="marker marker-d">D</span>';
-    if (player.is_small_blind) markers += '<span class="marker marker-sb">SB</span>';
-    if (player.is_big_blind) markers += '<span class="marker marker-bb">BB</span>';
-    if (player.status === 'all_in') markers += '<span class="marker marker-allin">ALL-IN</span>';
-    if (player.status === 'disconnected') markers += '<span class="marker marker-dc">AFK</span>';
-    
-    // Cartes du joueur
-    let cardsHtml = '';
-    if (player.hole_cards && player.hole_cards.length > 0) {
-        if (isMe || gameState?.betting_round === 'showdown') {
-            // Montrer les cartes
-            if (window.CardsModule) {
-                cardsHtml = `<div class="seat-cards">
-                    ${player.hole_cards.map(c => CardsModule.renderMiniCard(c, false)).join('')}
-                </div>`;
-            } else {
-                cardsHtml = `<div class="seat-cards">${player.hole_cards.join(' ')}</div>`;
-            }
-        } else {
-            // Dos de cartes pour les autres
-            cardsHtml = `<div class="seat-cards">
-                <div class="mini-card card-back"></div>
-                <div class="mini-card card-back"></div>
-            </div>`;
-        }
-    }
-    
-    // Dernière action
-    const lastAction = player.last_action 
-        ? `<div class="last-action">${formatAction(player.last_action)}</div>` 
-        : '';
-    
-    return `
-        <div class="player-avatar ${!isActive ? 'inactive' : ''}">${avatar}</div>
-        <div class="player-info">
-            <div class="player-name">${esc(player.username)}</div>
+        const cardsHtml = (p.hole_cards && p.hole_cards.length > 0)
+            ? p.hole_cards.map(c => typeof CardsModule !== 'undefined' ? CardsModule.renderCard(c, false) : `<div class="mini-card">${c}</div>`).join('')
+            : (p.status === 'active' || p.status === 'all_in' ? '<div class="mini-card back"></div><div class="mini-card back"></div>' : '');
+
+        const lastAction = p.last_action ? `<div class="last-action">${p.last_action}</div>` : '';
+
+        el.innerHTML = `
+            <div class="player-avatar">
+                <img src="${p.avatar || '/assets/avatars/default.svg'}" alt="${p.username}" onerror="this.src='/assets/avatars/default.svg'">
+                ${roleTag}
+            </div>
+            <div class="player-name">${escapeHtml(p.username)}</div>
             <div class="player-stack">${stack}</div>
+            <div class="player-cards">${cardsHtml}</div>
+            ${betDisplay}
             ${lastAction}
-        </div>
-        <div class="player-markers">${markers}</div>
-        ${cardsHtml}
-    `;
-}
-
-function renderEmptySeat(position) {
-    return `<div class="empty-seat-label">Siège ${position + 1}</div>`;
-}
-
-function formatAction(action) {
-    const actions = {
-        'fold': '✋ Fold',
-        'check': '✓ Check',
-        'call': '📞 Call',
-        'raise': '⬆️ Raise',
-        'all_in': '🔥 All-In',
-        'timeout': '⏰ Timeout'
-    };
-    return actions[action] || action;
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// Rendu des mises
-// ══════════════════════════════════════════════════════════════════════════════
-function renderBets(players) {
-    const container = $('betsContainer');
-    if (!container) return;
-    
-    container.innerHTML = '';
-    
-    const maxPlayers = gameState?.max_players || 9;
-    const myPosition = findMyPosition(players);
-    
-    players.forEach(player => {
-        if (!player.current_bet && !player.bet) return;
-        
-        const bet = player.current_bet || player.bet || 0;
-        if (bet <= 0) return;
-        
-        const relativePos = getRelativePosition(player.position, myPosition, maxPlayers);
-        
-        const betEl = document.createElement('div');
-        betEl.className = 'player-bet';
-        betEl.setAttribute('data-pos', relativePos);
-        betEl.innerHTML = `<span class="bet-chips">🪙</span> ${formatStack(bet)}`;
-        
-        container.appendChild(betEl);
+        `;
+        container.appendChild(el);
     });
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Mes cartes en grand
-// ══════════════════════════════════════════════════════════════════════════════
-function updateMyCardsDisplay(myPlayer) {
-    const container = $('myCardsDisplay');
+function getPositions(count, max) {
+    // Positions autour de l'ovale
+    const positions = [];
+    for (let i = 0; i < count; i++) {
+        const angle = (i / Math.max(count, max)) * 2 * Math.PI - Math.PI / 2;
+        const rx = 45, ry = 40;
+        positions.push({
+            top: `${50 + ry * Math.sin(angle)}%`,
+            left: `${50 + rx * Math.cos(angle)}%`,
+        });
+    }
+    return positions;
+}
+
+function updateCommunityCards(cards) {
+    const container = $('communityCards');
     if (!container) return;
-    
-    if (!myPlayer || !myPlayer.hole_cards || myPlayer.hole_cards.length === 0) {
-        container.innerHTML = '';
+    container.innerHTML = '';
+    if (!cards?.length) return;
+    cards.forEach(c => {
+        if (typeof CardsModule !== 'undefined') {
+            container.innerHTML += CardsModule.renderCard(c, false);
+        } else {
+            const el = document.createElement('div');
+            el.className = 'community-card';
+            el.textContent = c;
+            container.appendChild(el);
+        }
+    });
+}
+
+function updatePot(pot) {
+    const el = $('potDisplay');
+    if (el) el.textContent = `Pot: ${pot.toLocaleString()}`;
+}
+
+function updateMyCards() {
+    const container = $('myCardsContainer');
+    if (!container || !currentUser) return;
+    const myPlayer = gameState?.players?.find(p => p.user_id === currentUser.id);
+    if (!myPlayer?.hole_cards?.length) {
         container.classList.add('hidden');
         return;
     }
-    
     container.classList.remove('hidden');
-    
-    if (window.CardsModule) {
-        container.innerHTML = myPlayer.hole_cards
-            .map(c => CardsModule.renderCard(c, false))
-            .join('');
-    } else {
-        container.innerHTML = myPlayer.hole_cards
-            .map(c => `<div class="my-card">${c}</div>`)
-            .join('');
-    }
+    container.innerHTML = myPlayer.hole_cards
+        .map(c => typeof CardsModule !== 'undefined' ? CardsModule.renderCard(c, false) : `<div class="my-card">${c}</div>`)
+        .join('');
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Infos de jeu
-// ══════════════════════════════════════════════════════════════════════════════
 function updateGameInfo(state) {
-    // Blinds
-    const blindsEl = $('blindsInfo');
-    if (blindsEl) {
-        blindsEl.textContent = `Blinds: ${state.small_blind}/${state.big_blind}`;
-    }
-    
-    // Street
-    const streetEl = $('streetInfo');
-    if (streetEl) {
-        const streets = {
-            'preflop': 'Preflop',
-            'flop': 'Flop',
-            'turn': 'Turn',
-            'river': 'River',
-            'showdown': 'Showdown'
-        };
-        streetEl.textContent = streets[state.betting_round] || state.betting_round || '';
-    }
-    
-    // Hand number
-    const handEl = $('handNumber');
-    if (handEl) {
-        handEl.textContent = `Main #${state.round || 0}`;
-    }
+    const set = (id, text) => { const el = $(id); if (el) el.textContent = text; };
+    set('handNumber', `#${state.round || 0}`);
+    set('gameVariant', state.game_variant === 'plo' ? 'PLO' : "Hold'em");
+    const streets = { preflop: 'Preflop', flop: 'Flop', turn: 'Turn', river: 'River', showdown: 'Showdown' };
+    set('bettingRound', streets[state.betting_round] || state.betting_round || '');
+    set('gameBlinds', `${state.small_blind}/${state.big_blind}`);
+    const alive = state.players?.filter(p => !['folded', 'eliminated'].includes(p.status)).length || 0;
+    set('playersAlive', String(alive));
+    const me = state.players?.find(p => p.user_id === currentUser?.id);
+    set('myChipsInfo', me ? formatStack(me.chips || me.stack || 0) : '—');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Timer d'action (corrigé avec action_timeout_total)
+// Actions
+// ══════════════════════════════════════════════════════════════════════════════
+function setupActions() {
+    $('foldBtn')?.addEventListener('click', () => doAction('fold'));
+    $('checkBtn')?.addEventListener('click', () => doAction('check'));
+    $('callBtn')?.addEventListener('click', () => doAction('call'));
+    $('raiseBtn')?.addEventListener('click', () => showRaiseSlider());
+    $('confirmRaise')?.addEventListener('click', confirmRaise);
+    $('cancelRaise')?.addEventListener('click', hideRaiseSlider);
+
+    const slider = $('raiseAmount');
+    const input = $('raiseValue');
+    if (slider && input) {
+        slider.addEventListener('input', () => { input.value = slider.value; });
+        input.addEventListener('input', () => { slider.value = input.value; });
+    }
+}
+
+function updateActions(state) {
+    const isMyTurn = state.current_actor === currentUser?.id;
+    const me = state.players?.find(p => p.user_id === currentUser?.id);
+
+    $('foldBtn').disabled = !isMyTurn;
+    $('checkBtn').disabled = !isMyTurn;
+    $('raiseBtn').disabled = !isMyTurn;
+
+    // Check vs Call
+    if (me && state.current_bet > (me.current_bet || 0)) {
+        $('checkBtn').style.display = 'none';
+        $('callBtn').style.display = '';
+        $('callBtn').disabled = !isMyTurn;
+        const toCall = Math.min(state.current_bet - (me.current_bet || 0), me.chips || 0);
+        $('callBtn').textContent = `Call ${toCall} (C)`;
+    } else {
+        $('checkBtn').style.display = '';
+        $('callBtn').style.display = 'none';
+    }
+
+    // Slider range
+    if (me && isMyTurn) {
+        const slider = $('raiseAmount');
+        if (slider) {
+            slider.min = state.min_raise || state.big_blind || 10;
+            slider.max = me.chips || 1000;
+            slider.value = Math.max(Number(slider.min), Number(slider.value));
+        }
+    }
+}
+
+function doAction(action, amount = 0) {
+    sendWS({ type: 'action', action, amount });
+    hideRaiseSlider();
+    if (typeof SoundManager !== 'undefined') SoundManager.play('chip');
+}
+
+function showRaiseSlider() {
+    const el = $('raiseSlider');
+    if (el) el.style.display = 'flex';
+}
+
+function hideRaiseSlider() {
+    const el = $('raiseSlider');
+    if (el) el.style.display = 'none';
+}
+
+function confirmRaise() {
+    const amount = parseInt($('raiseValue')?.value || $('raiseAmount')?.value || 0);
+    if (amount > 0) doAction('raise', amount);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Quick Bets
+// ══════════════════════════════════════════════════════════════════════════════
+function setupQuickBets() {
+    document.querySelectorAll('.qb-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const key = btn.dataset.key;
+            const bet = currentQuickBets.find(b => b.key === key);
+            if (bet) {
+                if (key === 'allin') {
+                    doAction('all_in', bet.amount);
+                } else {
+                    doAction('raise', bet.amount);
+                }
+            }
+        });
+    });
+}
+
+function updateQuickBetsUI(state) {
+    const container = $('quickBets');
+    if (!container) return;
+    const isMyTurn = state.current_actor === currentUser?.id;
+    container.style.display = isMyTurn ? 'flex' : 'none';
+
+    if (!isMyTurn || !currentQuickBets?.length) return;
+
+    document.querySelectorAll('.qb-btn').forEach(btn => {
+        const key = btn.dataset.key;
+        const bet = currentQuickBets.find(b => b.key === key);
+        if (bet) {
+            btn.style.display = '';
+            btn.textContent = `${bet.label} (${bet.amount})`;
+        } else {
+            btn.style.display = 'none';
+        }
+    });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Timer
 // ══════════════════════════════════════════════════════════════════════════════
 function updateActionTimer(state) {
     const timerEl = $('actionTimer');
-    const progressEl = $('timerProgress');
-    
-    if (!state.current_actor || state.action_timer === null || state.action_timer === undefined) {
+    if (!state.current_actor || state.action_timer == null) {
         if (timerEl) timerEl.classList.add('hidden');
-        if (window.TimerModule) TimerModule.stop();
+        if (typeof TimerModule !== 'undefined') TimerModule.stop();
         return;
     }
-    
     if (timerEl) timerEl.classList.remove('hidden');
-    
-    // Utiliser action_timeout_total du backend, sinon fallback à 20
-    const totalTime = state.action_timeout_total || 20;
+    const total = state.action_timeout_total || 20;
     const remaining = state.action_timer;
-    
-    if (window.TimerModule) {
-        TimerModule.start(remaining, totalTime, (secs, pct) => {
-            const timerText = $('timerText');
-            if (timerText) {
-                timerText.textContent = secs;
-                timerText.classList.toggle('urgent', secs <= 5);
-            }
-            if (progressEl) {
-                progressEl.style.width = `${pct}%`;
-                progressEl.classList.toggle('urgent', pct <= 25);
+    if (typeof TimerModule !== 'undefined') {
+        TimerModule.start(remaining, total, (secs) => {
+            if (timerEl) timerEl.textContent = `⏱ ${secs}s`;
+        });
+    } else if (timerEl) {
+        timerEl.textContent = `⏱ ${remaining}s`;
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Hand Result
+// ══════════════════════════════════════════════════════════════════════════════
+function handleHandResult(msg) {
+    if (typeof SoundManager !== 'undefined') SoundManager.play('win');
+    const winners = msg.winners || [];
+    const names = winners.map(w => `${w.username} (${w.hand || '?'})`).join(', ');
+    toast(`Gagnant: ${names} — Pot: ${msg.pot}`, 'success');
+
+    // Showdown cards
+    if (msg.showdown) {
+        msg.showdown.forEach(p => {
+            // Mettre à jour les cartes visibles
+            if (gameState?.players) {
+                const gp = gameState.players.find(x => x.user_id === p.user_id);
+                if (gp) gp.hole_cards = p.hole_cards;
             }
         });
-    } else {
-        // Fallback simple
-        const timerText = $('timerText');
-        if (timerText) timerText.textContent = remaining;
-        if (progressEl) {
-            const pct = (remaining / totalTime) * 100;
-            progressEl.style.width = `${pct}%`;
-        }
-    }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// Actions joueur
-// ══════════════════════════════════════════════════════════════════════════════
-function updateActions(isMyTurn, state) {
-    const panel = $('actionPanel');
-    if (!panel) return;
-    
-    if (!isMyTurn) {
-        panel.classList.add('disabled');
-        return;
-    }
-    
-    panel.classList.remove('disabled');
-    
-    const myPlayer = findMyPlayer(state.players);
-    if (!myPlayer) return;
-    
-    const currentBet = state.current_bet || 0;
-    const myBet = myPlayer.current_bet || myPlayer.bet || 0;
-    const toCall = currentBet - myBet;
-    const myStack = myPlayer.chips || myPlayer.stack || 0;
-    const minRaise = state.min_raise || state.big_blind * 2;
-    const maxRaise = state.max_raise || myStack;
-    
-    // Bouton Fold
-    const foldBtn = $('btnFold');
-    if (foldBtn) foldBtn.disabled = false;
-    
-    // Bouton Check/Call
-    const callBtn = $('btnCall');
-    if (callBtn) {
-        if (toCall <= 0) {
-            callBtn.textContent = 'Check';
-            callBtn.disabled = false;
-        } else if (toCall >= myStack) {
-            callBtn.textContent = `Call All-In (${formatStack(myStack)})`;
-            callBtn.disabled = false;
-        } else {
-            callBtn.textContent = `Call ${formatStack(toCall)}`;
-            callBtn.disabled = false;
-        }
-    }
-    
-    // Bouton Raise
-    const raiseBtn = $('btnRaise');
-    const raiseInput = $('raiseAmount');
-    if (raiseBtn && raiseInput) {
-        if (myStack <= toCall) {
-            raiseBtn.disabled = true;
-            raiseInput.disabled = true;
-        } else {
-            raiseBtn.disabled = false;
-            raiseInput.disabled = false;
-            raiseInput.min = minRaise;
-            raiseInput.max = maxRaise;
-            raiseInput.value = Math.min(minRaise, maxRaise);
-        }
-    }
-    
-    // Bouton All-In
-    const allInBtn = $('btnAllIn');
-    if (allInBtn) {
-        allInBtn.textContent = `All-In (${formatStack(myStack)})`;
-        allInBtn.disabled = false;
-    }
-}
-
-function sendAction(action, amount = 0) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    
-    sendWS({
-        type: 'action',
-        action: action,
-        amount: parseInt(amount) || 0
-    });
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// Événements
-// ══════════════════════════════════════════════════════════════════════════════
-function setupEvents() {
-    // Actions
-    $('btnFold')?.addEventListener('click', () => sendAction('fold'));
-    $('btnCall')?.addEventListener('click', () => sendAction('call'));
-    $('btnRaise')?.addEventListener('click', () => {
-        const amount = parseInt($('raiseAmount')?.value) || 0;
-        sendAction('raise', amount);
-    });
-    $('btnAllIn')?.addEventListener('click', () => sendAction('all_in'));
-    
-    // Slider raise
-    $('raiseAmount')?.addEventListener('input', (e) => {
-        const display = $('raiseDisplay');
-        if (display) display.textContent = formatStack(parseInt(e.target.value) || 0);
-    });
-    
-    // Raccourcis clavier
-    document.addEventListener('keydown', (e) => {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-        
-        switch (e.key.toLowerCase()) {
-            case 'f': sendAction('fold'); break;
-            case 'c': sendAction('call'); break;
-            case 'r': $('raiseAmount')?.focus(); break;
-            case 'a': sendAction('all_in'); break;
-        }
-    });
-    
-    // Toggle BB display
-    $('stackDisplayToggle')?.addEventListener('change', (e) => {
-        showStacksInBB = e.target.checked;
-        savePreferences();
         if (gameState) render(gameState);
-    });
-    
-    // Quitter la table
-    $('btnLeave')?.addEventListener('click', async () => {
-        if (confirm('Quitter la table?')) {
-            try {
-                await fetch(`/api/tables/${tableId}/leave?user_id=${currentUser?.id}`, {
-                    method: 'POST'
-                });
-            } catch (e) {
-                // Ignorer
-            }
-            window.location.href = '/lobby';
-        }
-    });
+    }
+
+    if (typeof HandHistory !== 'undefined') {
+        HandHistory.add({
+            round: gameState?.round || 0,
+            winners, pot: msg.pot,
+            community: msg.community_cards || [],
+        });
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Chat de table
+// Chat
 // ══════════════════════════════════════════════════════════════════════════════
-function setupTableChat() {
+function setupChat() {
     const input = $('tableChatInput');
     const btn = $('tableChatSend');
-    
     if (!input || !btn) return;
-    
+    if (currentUser) { input.disabled = false; btn.disabled = false; }
+
     const send = () => {
         const text = input.value.trim();
         if (!text) return;
-        
-        sendWS({
-            type: 'chat',
-            message: text
-        });
-        
+        sendWS({ type: 'chat', message: text });
         input.value = '';
     };
-    
     btn.addEventListener('click', send);
-    input.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') send();
+    input.addEventListener('keypress', (e) => { if (e.key === 'Enter') send(); });
+}
+
+function appendChatMessage(username, message) {
+    const container = $('tableChatMessages');
+    if (!container) return;
+    const div = document.createElement('div');
+    div.className = 'tchat-msg';
+    div.innerHTML = `<strong>${escapeHtml(username)}</strong>: ${escapeHtml(message)}`;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Theme Modal
+// ══════════════════════════════════════════════════════════════════════════════
+function setupThemeModal() {
+    const btn = $('themeToggleBtn');
+    const modal = $('themeModal');
+    if (!btn || !modal) return;
+
+    btn.addEventListener('click', () => { modal.style.display = 'flex'; });
+    modal.querySelector('.close')?.addEventListener('click', () => { modal.style.display = 'none'; });
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+
+    $('applyTheme')?.addEventListener('click', () => {
+        const theme = $('themeSelect')?.value || 'dark';
+        const cardDeck = $('cardDeckSelect')?.value || 'standard';
+        const tableStyle = $('tableStyleSelect')?.value || 'felt';
+
+        if (typeof ThemeManager !== 'undefined') ThemeManager.setTheme(theme);
+        if (typeof CardsModule !== 'undefined') CardsModule.setDeck(cardDeck);
+        document.body.setAttribute('data-table-style', tableStyle);
+
+        try {
+            localStorage.setItem('poker_visual_prefs', JSON.stringify({ theme, cardDeck, tableStyle }));
+        } catch (e) {}
+
+        modal.style.display = 'none';
+        toast('Thème appliqué', 'success');
+    });
+
+    // Charger les préférences
+    try {
+        const prefs = JSON.parse(localStorage.getItem('poker_visual_prefs') || '{}');
+        if (prefs.theme && typeof ThemeManager !== 'undefined') ThemeManager.setTheme(prefs.theme);
+        if (prefs.cardDeck && typeof CardsModule !== 'undefined') CardsModule.setDeck(prefs.cardDeck);
+        if (prefs.tableStyle) document.body.setAttribute('data-table-style', prefs.tableStyle);
+        if (prefs.theme) { const el = $('themeSelect'); if (el) el.value = prefs.theme; }
+        if (prefs.cardDeck) { const el = $('cardDeckSelect'); if (el) el.value = prefs.cardDeck; }
+        if (prefs.tableStyle) { const el = $('tableStyleSelect'); if (el) el.value = prefs.tableStyle; }
+    } catch (e) {}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Keyboard Shortcuts
+// ══════════════════════════════════════════════════════════════════════════════
+function setupKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        const isMyTurn = gameState?.current_actor === currentUser?.id;
+        if (!isMyTurn) return;
+
+        switch (e.key.toLowerCase()) {
+            case 'f': doAction('fold'); break;
+            case 'c':
+                if ($('callBtn')?.style.display !== 'none') doAction('call');
+                else doAction('check');
+                break;
+            case 'r': showRaiseSlider(); break;
+            case 'escape': hideRaiseSlider(); break;
+        }
     });
 }
 
-function addTableChat(msg) {
-    const container = $('tableChatMessages');
-    if (!container) return;
-    
-    const msgEl = document.createElement('div');
-    msgEl.className = 'chat-message';
-    if (msg.user_id === currentUser?.id) msgEl.classList.add('own-message');
-    
-    msgEl.innerHTML = `
-        <span class="chat-username">${esc(msg.username)}:</span>
-        <span class="chat-text">${esc(msg.message)}</span>
-    `;
-    
-    container.appendChild(msgEl);
-    container.scrollTop = container.scrollHeight;
-    
-    // Limiter à 100 messages
-    while (container.children.length > 100) {
-        container.removeChild(container.firstChild);
-    }
-}
-
 // ══════════════════════════════════════════════════════════════════════════════
-// Infos tournoi
+// Utilities
 // ══════════════════════════════════════════════════════════════════════════════
-async function loadTournamentInfo() {
-    if (!gameState?.tournament_id) return;
-    
-    try {
-        const resp = await fetch(`/api/tournaments/${gameState.tournament_id}`);
-        if (resp.ok) {
-            const data = await resp.json();
-            updateTournamentPanel(data);
-        }
-    } catch (e) {
-        console.error('Failed to load tournament info:', e);
-    }
-}
-
-function updateTournamentPanel(data) {
-    const panel = $('tournamentInfo');
-    if (!panel) return;
-    
-    panel.classList.remove('hidden');
-    panel.innerHTML = `
-        <div class="tournament-header">🏆 ${esc(data.name)}</div>
-        <div class="tournament-stats">
-            <div>Joueurs: ${data.players_count}</div>
-            <div>Niveau: ${data.current_level + 1}</div>
-            <div>Blinds: ${data.current_blinds?.small_blind}/${data.current_blinds?.big_blind}</div>
-        </div>
-    `;
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// Utilitaires
-// ══════════════════════════════════════════════════════════════════════════════
-function $(id) {
-    return document.getElementById(id);
-}
-
-function show(id) {
-    const el = $(id);
-    if (el) el.classList.remove('hidden');
-}
-
-function hide(id) {
-    const el = $(id);
-    if (el) el.classList.add('hidden');
-}
-
-function esc(str) {
-    if (!str) return '';
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-}
-
 function formatStack(amount) {
-    if (amount === null || amount === undefined) return '0';
-    
+    if (amount == null) return '0';
     if (showStacksInBB && gameState?.big_blind) {
-        const bb = amount / gameState.big_blind;
-        return `${bb.toFixed(1)} BB`;
+        return `${(amount / gameState.big_blind).toFixed(1)} BB`;
     }
-    
     return amount.toLocaleString();
 }
 
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 function toast(message, type = 'info') {
-    const container = $('toastContainer') || createToastContainer();
-    
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.textContent = message;
-    
-    container.appendChild(toast);
-    
-    setTimeout(() => toast.classList.add('show'), 10);
-    setTimeout(() => {
-        toast.classList.remove('show');
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
-}
-
-function createToastContainer() {
-    const container = document.createElement('div');
-    container.id = 'toastContainer';
-    container.className = 'toast-container';
-    document.body.appendChild(container);
-    return container;
-}
-
-function updateCommunityCardsLegacy(cards) {
-    const container = $('communityCards');
-    if (!container) return;
-    
-    container.innerHTML = '';
-    
-    if (!cards || cards.length === 0) return;
-    
-    cards.forEach(card => {
-        const cardEl = document.createElement('div');
-        cardEl.className = 'community-card';
-        cardEl.textContent = card;
-        container.appendChild(cardEl);
-    });
+    let container = $('toastContainer') || (() => {
+        const c = document.createElement('div');
+        c.id = 'toastContainer';
+        c.className = 'toast-container';
+        document.body.appendChild(c);
+        return c;
+    })();
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = message;
+    container.appendChild(el);
+    setTimeout(() => el.classList.add('show'), 10);
+    setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 300); }, 3000);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Démarrage
+// Start
 // ══════════════════════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', init);

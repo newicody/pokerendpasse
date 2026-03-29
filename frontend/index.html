@@ -3,109 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multiplayer Poker Game</title>
+    <title>PokerEndPasse — Freeroll Tournaments</title>
     <link rel="stylesheet" href="/css/common.css">
     <style>
         .landing {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            text-align: center;
-            padding: 20px;
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; min-height: 100vh;
+            text-align: center; padding: 40px;
         }
-        
-        .landing h1 {
-            font-size: 48px;
-            color: #ffd700;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
-            margin-bottom: 20px;
-        }
-        
-        .landing p {
-            font-size: 18px;
-            margin-bottom: 40px;
-            opacity: 0.9;
-        }
-        
-        .buttons {
-            display: flex;
-            gap: 20px;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-        
-        .btn-large {
-            padding: 15px 40px;
-            font-size: 18px;
-            border-radius: 12px;
-            text-decoration: none;
-            display: inline-block;
-            transition: transform 0.2s;
-        }
-        
-        .btn-large:hover {
-            transform: translateY(-3px);
-        }
-        
+        .landing h1 { font-size: 48px; margin-bottom: 12px; color: var(--accent); }
+        .landing p { font-size: 18px; color: var(--text-secondary); margin-bottom: 32px; }
         .features {
-            margin-top: 60px;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 30px;
-            max-width: 1000px;
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px; max-width: 800px; margin-top: 40px;
         }
-        
         .feature {
-            background: rgba(0, 0, 0, 0.5);
-            padding: 20px;
-            border-radius: 12px;
-            backdrop-filter: blur(10px);
+            background: var(--bg-tertiary); border: 1px solid var(--border-subtle);
+            border-radius: 10px; padding: 20px;
         }
-        
-        .feature h3 {
-            color: #ffd700;
-            margin-bottom: 10px;
-        }
-        
-        .feature p {
-            font-size: 14px;
-            margin-bottom: 0;
-        }
-        
-        @media (max-width: 768px) {
-            .landing h1 { font-size: 32px; }
-            .btn-large { padding: 12px 25px; font-size: 16px; }
-        }
+        .feature h3 { color: var(--accent); margin-bottom: 6px; }
+        .feature p { font-size: 14px; color: var(--text-muted); }
+        .btn-large { font-size: 20px; padding: 16px 40px; }
     </style>
 </head>
 <body>
     <div class="landing">
-        <h1>♠️ Multiplayer Poker Game ♥️</h1>
-        <p>Texas Hold'em No Limit - Play with friends online</p>
-        
-        <div class="buttons">
-            <a href="/lobby" class="btn-primary btn-large">Enter Lobby</a>
-        </div>
-        
+        <h1>♠ PokerEndPasse ♥</h1>
+        <p>Tournois Freeroll — Texas Hold'em &amp; PLO — Jusqu'à 100 joueurs</p>
+        <a href="/lobby" class="btn-primary btn-large">Entrer dans le Lobby</a>
         <div class="features">
-            <div class="feature">
-                <h3>🎮 Multiplayer</h3>
-                <p>Play with up to 9 players per table</p>
-            </div>
-            <div class="feature">
-                <h3>🃏 Texas Hold'em</h3>
-                <p>No Limit Texas Hold'em with real rules</p>
-            </div>
-            <div class="feature">
-                <h3>💬 Real-time</h3>
-                <p>Live updates with WebSocket technology</p>
-            </div>
-            <div class="feature">
-                <h3>🎯 Multiple Tables</h3>
-                <p>Create or join any table in the lobby</p>
-            </div>
+            <div class="feature"><h3>🏆 Tournois MTT</h3><p>Multi-table jusqu'à 100 joueurs avec rééquilibrage</p></div>
+            <div class="feature"><h3>🃏 Hold'em &amp; PLO</h3><p>No-Limit Texas Hold'em et Pot-Limit Omaha</p></div>
+            <div class="feature"><h3>🔒 Deck sécurisé</h3><p>Protocole SRA commit-reveal vérifiable</p></div>
+            <div class="feature"><h3>🎨 Personnalisable</h3><p>Thèmes, jeux de cartes, tables et avatars</p></div>
         </div>
     </div>
 </body>

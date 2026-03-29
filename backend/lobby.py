@@ -2,10 +2,7 @@
 """
 Lobby — Gestion des tables et utilisateurs
 ==========================================
-Version corrigée avec:
-- Meilleure gestion des erreurs
-- Intégration WebSocket
-- Support tournois freeroll
+Avec crash/resume : reconstruction des tables au démarrage.
 """
 
 import asyncio
@@ -15,9 +12,9 @@ from typing import Dict, List, Optional
 from datetime import datetime
 
 from .models import (
-    Table, User, TableStatus, GameType, LobbyInfo, CreateTableRequest
+    Table, User, TableStatus, GameType, GameVariant, LobbyInfo, CreateTableRequest,
 )
-from .game_engine import PokerTable
+from .game_engine import PokerTable, STATE_DIR
 from .storage import XMLStorage
 from .tournament import TournamentManager
 
@@ -25,11 +22,6 @@ logger = logging.getLogger(__name__)
 
 
 class Lobby:
-    """
-    Gestionnaire principal du lobby.
-    Gère les tables, utilisateurs et l'interface avec le TournamentManager.
-    """
-    
     def __init__(self):
         self.tables: Dict[str, PokerTable] = {}
         self.users: Dict[str, User] = {}
@@ -38,11 +30,9 @@ class Lobby:
         self.storage = XMLStorage()
         self.tournament_manager = TournamentManager(data_dir="data", lobby=self)
         self._started = False
-        
         self._load_data()
 
     def _load_data(self):
-        """Charge les utilisateurs depuis le stockage"""
         try:
             for user_id in self.storage.list_users():
                 ud = self.storage.load_user(user_id)
@@ -55,212 +45,201 @@ class Lobby:
             logger.error(f"Error loading users: {e}")
 
     async def start(self):
-        """Démarre le lobby et les services associés"""
         if self._started:
             return
-        
         self._started = True
-        
+
+        # Crash recovery : reconstruire les tables en cours
+        await self._recover_tables()
+
         # Démarrer le monitor des tournois
         self.tournament_manager.start_monitor()
-        
-        # Démarrer le WebSocket manager si disponible
-        if self._ws_manager and hasattr(self._ws_manager, 'start'):
-            await self._ws_manager.start()
-        
+
         logger.info("Lobby started")
 
     async def stop(self):
-        """Arrête le lobby proprement"""
         self._started = False
-        
-        # Arrêter le monitor des tournois
         await self.tournament_manager.stop_monitor()
-        
-        # Fermer toutes les tables
         for table_id in list(self.tables.keys()):
             try:
                 await self.close_table(table_id)
             except Exception as e:
                 logger.error(f"Error closing table {table_id}: {e}")
-        
-        # Arrêter le WebSocket manager
-        if self._ws_manager and hasattr(self._ws_manager, 'stop'):
-            await self._ws_manager.stop()
-        
         logger.info("Lobby stopped")
+
+    # ── Crash Recovery ────────────────────────────────────────────────────────
+
+    async def _recover_tables(self):
+        """Reconstruit les tables depuis les fichiers JSON sauvegardés"""
+        recovered = 0
+        for state_file in STATE_DIR.glob("*.json"):
+            try:
+                state_data = PokerTable.load_state(state_file.stem)
+                if not state_data:
+                    continue
+
+                table_id = state_data['table_id']
+                if table_id in self.tables:
+                    continue
+
+                variant_str = state_data.get('game_variant', 'holdem')
+                try:
+                    variant = GameVariant(variant_str)
+                except ValueError:
+                    variant = GameVariant.HOLDEM
+
+                table = PokerTable(
+                    table_id=table_id,
+                    name=state_data.get('name', 'Recovered Table'),
+                    tournament_id=state_data.get('tournament_id', ''),
+                    max_players=state_data.get('max_players', 9),
+                    small_blind=state_data.get('small_blind', 5),
+                    big_blind=state_data.get('big_blind', 10),
+                    game_variant=variant,
+                )
+
+                # Restaurer les joueurs
+                for uid, pdata in state_data.get('players', {}).items():
+                    from .game_engine import PlayerState, PlayerStatus
+                    try:
+                        status = PlayerStatus(pdata.get('status', 'active'))
+                    except ValueError:
+                        status = PlayerStatus.ACTIVE
+
+                    table.players[uid] = PlayerState(
+                        user_id=pdata['user_id'],
+                        username=pdata['username'],
+                        avatar=pdata.get('avatar'),
+                        chips=pdata.get('chips', 0),
+                        position=pdata.get('position', 0),
+                        status=status,
+                    )
+                    self.user_to_table[uid] = table_id
+
+                table._hand_round = state_data.get('hand_round', 0)
+                table._dealer_btn = state_data.get('dealer_btn', 0)
+
+                self.tables[table_id] = table
+                recovered += 1
+                logger.info(f"Recovered table: {table.name} ({table_id})")
+
+            except Exception as e:
+                logger.error(f"Recovery failed for {state_file}: {e}")
+
+        if recovered:
+            logger.info(f"Recovered {recovered} table(s) from crash")
 
     # ── Tables ────────────────────────────────────────────────────────────────
 
-    async def create_table(self, request: CreateTableRequest) -> Table:
-        """Crée une nouvelle table"""
-        table_id = f"table_{uuid.uuid4().hex[:8]}"
-        
-        game_type = getattr(request, 'game_type', None) or GameType.TOURNAMENT
-        tournament_id = getattr(request, 'tournament_id', None)
-        
-        # Récupérer les blinds du tournoi si applicable
-        small_blind = 10
-        big_blind = 20
-        
-        if tournament_id:
-            tournament = self.tournament_manager.get_tournament(tournament_id)
-            if tournament:
-                blinds = tournament.get_current_blinds()
-                small_blind = blinds.get('small_blind', 10)
-                big_blind = blinds.get('big_blind', 20)
-        
+    async def create_table(
+        self,
+        request: CreateTableRequest,
+        game_variant: GameVariant = GameVariant.HOLDEM,
+    ) -> PokerTable:
+        table_id = str(uuid.uuid4())
+
+        # Blinds depuis le tournoi si applicable
+        small_blind, big_blind = 5, 10
+        if request.tournament_id:
+            t = self.tournament_manager.get_tournament(request.tournament_id)
+            if t:
+                blinds = t.get_current_blinds()
+                small_blind = blinds['small_blind']
+                big_blind = blinds['big_blind']
+
         table = PokerTable(
             table_id=table_id,
             name=request.name,
-            game_type=game_type,
+            tournament_id=request.tournament_id,
             max_players=request.max_players,
-            min_buy_in=0,
-            max_buy_in=0,
             small_blind=small_blind,
             big_blind=big_blind,
-            tournament_id=tournament_id
+            game_variant=game_variant,
         )
-        
+
         if self._ws_manager:
             table.set_ws_manager(self._ws_manager)
-        
+
         self.tables[table_id] = table
-        logger.info(f"Table created: {table_id} ({request.name})")
-        
-        return table.get_info()
+        logger.info(f"Table created: {request.name} ({table_id})")
+        return table
+
+    async def close_table(self, table_id: str):
+        table = self.tables.pop(table_id, None)
+        if table:
+            await table.close()
+            # Nettoyer user_to_table
+            for uid in list(self.user_to_table.keys()):
+                if self.user_to_table.get(uid) == table_id:
+                    del self.user_to_table[uid]
+            logger.info(f"Table closed: {table_id}")
+
+    async def join_table(self, user_id: str, table_id: str) -> bool:
+        table = self.tables.get(table_id)
+        if not table:
+            return False
+
+        # Récupérer les infos utilisateur
+        user = self.users.get(user_id)
+        username = user.username if user else user_id
+        avatar = user.avatar if user else None
+
+        # Chips depuis le tournoi
+        chips = 10000
+        if table.tournament_id:
+            t = self.tournament_manager.get_tournament(table.tournament_id)
+            if t:
+                player_data = next(
+                    (p for p in t.players if p['user_id'] == user_id), None
+                )
+                if player_data:
+                    chips = player_data.get('chips', t.starting_chips)
+                    username = player_data.get('username', username)
+                    avatar = player_data.get('avatar', avatar)
+
+        success = table.add_player(user_id, username, chips, avatar)
+        if success:
+            self.user_to_table[user_id] = table_id
+        return success
+
+    async def leave_table(self, user_id: str):
+        table_id = self.user_to_table.pop(user_id, None)
+        if table_id and table_id in self.tables:
+            self.tables[table_id].remove_player(user_id)
 
     async def get_table(self, table_id: str) -> Optional[Table]:
-        """Récupère les infos d'une table"""
         table = self.tables.get(table_id)
         return table.get_info() if table else None
 
-    async def list_tables(self, tournament_id: str = None) -> List[Table]:
-        """Liste les tables, optionnellement filtrées par tournoi"""
-        tables = []
-        for table in self.tables.values():
-            if tournament_id and table.tournament_id != tournament_id:
-                continue
-            tables.append(table.get_info())
-        return tables
+    async def list_tables(self) -> List[Table]:
+        return [t.get_info() for t in self.tables.values()]
 
-    async def join_table(self, user_id: str, table_id: str, chips: int = 10000) -> bool:
-        """Fait rejoindre un utilisateur à une table"""
-        # Charger l'utilisateur si nécessaire
+    # ── Users ─────────────────────────────────────────────────────────────────
+
+    async def register_user(self, user_id: str, username: str):
         if user_id not in self.users:
-            from .auth import auth_manager
-            ud = auth_manager.get_user_by_id(user_id)
-            if ud:
-                self.users[user_id] = User(**ud)
-                logger.info(f"Loaded user {ud.get('username')} from auth")
-            else:
-                logger.error(f"User {user_id} not found")
-                return False
-        
-        if table_id not in self.tables:
-            logger.error(f"Table {table_id} not found")
-            return False
-        
-        table = self.tables[table_id]
-        user = self.users[user_id]
-        
-        if not table.can_join():
-            logger.warning(f"Table {table_id} is full")
-            return False
-        
-        # Quitter l'ancienne table si nécessaire
-        old_table_id = self.user_to_table.get(user_id)
-        if old_table_id and old_table_id != table_id:
-            await self.leave_table(user_id)
-        
-        ok = await table.add_player(user, chips)
-        
-        if ok:
-            self.user_to_table[user_id] = table_id
-            logger.info(f"User {user.username} joined table {table_id} with {chips} chips")
-        
-        return ok
-
-    async def leave_table(self, user_id: str):
-        """Fait quitter une table à un utilisateur"""
-        table_id = self.user_to_table.pop(user_id, None)
-        
-        if table_id and table_id in self.tables:
-            await self.tables[table_id].remove_player(user_id)
-            logger.info(f"User {user_id} left table {table_id}")
-
-    async def close_table(self, table_id: str):
-        """Ferme une table"""
-        if table_id not in self.tables:
-            return
-        
-        table = self.tables[table_id]
-        await table.close()
-        del self.tables[table_id]
-        
-        # Nettoyer les références utilisateurs
-        users_to_remove = [
-            uid for uid, tid in self.user_to_table.items()
-            if tid == table_id
-        ]
-        for uid in users_to_remove:
-            del self.user_to_table[uid]
-        
-        logger.info(f"Table {table_id} closed")
-
-    # ── Utilisateurs ──────────────────────────────────────────────────────────
-
-    async def add_user(self, username: str, email: str = None) -> User:
-        """Ajoute un nouvel utilisateur"""
-        uid = str(uuid.uuid4())
-        
-        user = User(
-            id=uid,
-            username=username,
-            email=email,
-            avatar='default',
-            is_admin=False,
-            status='active'
-        )
-        
-        self.users[uid] = user
-        self.storage.save_user(user.model_dump())
-        
-        logger.info(f"User created: {username} ({uid})")
-        return user
+            user = User(id=user_id, username=username)
+            self.users[user_id] = user
+            self.storage.save_user(user_id, user.model_dump())
 
     def get_user(self, user_id: str) -> Optional[User]:
-        """Récupère un utilisateur"""
         return self.users.get(user_id)
 
-    def get_user_table(self, user_id: str) -> Optional[str]:
-        """Récupère la table d'un utilisateur"""
-        return self.user_to_table.get(user_id)
-
-    # ── Info lobby ────────────────────────────────────────────────────────────
-
-    async def get_lobby_info(self) -> LobbyInfo:
-        """Récupère les informations du lobby"""
-        return LobbyInfo(
-            tournaments=list(self.tournament_manager.tournaments.values()),
-            active_players=len(self.user_to_table),
-            total_players=len(self.users),
-            total_tables=len(self.tables)
-        )
+    # ── Stats ─────────────────────────────────────────────────────────────────
 
     def get_stats(self) -> dict:
-        """Récupère des statistiques détaillées"""
+        active_players = len(self.user_to_table)
         return {
-            'total_users': len(self.users),
-            'active_players': len(self.user_to_table),
+            'active_players': active_players,
+            'total_players': len(self.users),
             'total_tables': len(self.tables),
-            'playing_tables': len([
-                t for t in self.tables.values()
-                if t.status == TableStatus.PLAYING
-            ]),
-            'total_tournaments': len(self.tournament_manager.tournaments),
-            'active_tournaments': len([
-                t for t in self.tournament_manager.tournaments.values()
-                if t.status == 'in_progress'
-            ]),
+            'tournaments': len(self.tournament_manager.tournaments),
+            'tables': {
+                tid: {
+                    'name': t.name,
+                    'players': len(t.players),
+                    'status': t.status.value if hasattr(t.status, 'value') else str(t.status),
+                }
+                for tid, t in self.tables.items()
+            },
         }

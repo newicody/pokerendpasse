@@ -3,76 +3,104 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Poker Lobby — Freeroll Tournaments</title>
+    <title>Lobby — PokerEndPasse</title>
     <link rel="stylesheet" href="/css/common.css">
     <link rel="stylesheet" href="/css/lobby.css">
-    <link rel="stylesheet" href="/css/lobby_patch.css">
 </head>
 <body>
     <div class="lobby-container">
-        <div class="header">
-            <div class="logo">
-                <h1>♠️ Poker Lobby ♥️</h1>
-                <a href="/" class="home-link">← Home</a>
-                <a href="/profile" id="profileLink" class="profile-link" style="display:none">👤 Profile</a>
-                <button id="adminBtn" class="admin-btn" style="display:none" onclick="location.href='/admin'">👑 Admin</button>
-            </div>
-            <div class="server-time"><span class="time-icon">🕐</span><span id="serverTime">--:--:--</span></div>
-            <div class="user-info" id="userInfo">
-                <div class="avatar" id="userAvatar"></div>
-                <div class="details"><span id="username">Guest</span><span id="userStatus" class="user-status-text"></span></div>
-                <div id="userActions">
-                    <button id="loginBtn" class="btn-small">Login</button>
-                    <button id="registerBtn" class="btn-small">Register</button>
-                    <button id="logoutBtn" class="btn-small" style="display:none">Logout</button>
-                    <button id="optionsBtn" class="btn-small" title="Settings">⚙️</button>
+        <!-- Header -->
+        <header class="lobby-header">
+            <div class="logo">♠ PokerEndPasse</div>
+            <nav class="header-nav">
+                <span id="userDisplay" class="user-info"></span>
+                <button id="loginBtn" class="btn-secondary">Connexion</button>
+                <button id="registerBtn" class="btn-secondary">Inscription</button>
+                <button id="optionsBtn" class="btn-small">⚙️</button>
+                <button id="logoutBtn" class="btn-small" style="display:none">Déconnexion</button>
+                <a href="/admin" id="adminLink" class="btn-small" style="display:none">🔧 Admin</a>
+            </nav>
+        </header>
+
+        <!-- Main content -->
+        <div class="lobby-main">
+            <!-- Tournaments -->
+            <section class="lobby-section">
+                <h2>🏆 Tournois</h2>
+                <div id="tournamentsList" class="tournaments-grid">
+                    <div class="loading">Chargement…</div>
                 </div>
-            </div>
-        </div>
+            </section>
 
-        <div id="guestWarning" class="warning-banner hidden">
-            ⚠️ Spectator mode. <a href="#" onclick="showLoginModal();return false">Login</a> or <a href="#" onclick="showRegisterModal();return false">Register</a> to play.
-        </div>
-
-        <div class="lobby-content">
-            <div class="games-column">
-                <div class="section-header"><h2>🏆 Active Tournaments</h2><span class="section-badge">In Progress</span></div>
-                <div class="tournaments-grid" id="activeTournamentsGrid"><div class="loading">Loading...</div></div>
-
-                <div class="section-header" style="margin-top:30px"><h2>📅 Upcoming Freerolls</h2><span class="section-badge">Register Now</span></div>
-                <div class="tournaments-grid" id="upcomingTournamentsGrid"><div class="loading">Loading...</div></div>
-
-                <div class="section-header" style="margin-top:30px"><h2>🏁 Finished</h2></div>
-                <div class="tournaments-grid" id="finishedTournamentsGrid"><div class="loading">Loading...</div></div>
-            </div>
-
-            <div class="chat-column">
-                <div class="chat-container">
-                    <div class="chat-header"><h3>💬 Lobby Chat</h3><div class="chat-settings"><button id="chatSettingsBtn" title="Chat Settings">⚙️</button><span id="chatUserCount" class="user-count">0 online</span></div></div>
-                    <div class="chat-messages" id="chatMessages"><div class="chat-welcome">Welcome to the Poker Lobby! 🎰</div></div>
-                    <div class="chat-input-area">
-                        <div class="smiley-picker"><button class="smiley-btn" id="smileyBtn">😊</button><div class="smiley-dropdown" id="smileyDropdown"></div></div>
-                        <input type="text" id="chatInput" placeholder="Type a message..." disabled>
-                        <button id="chatSendBtn" disabled>Send</button>
-                    </div>
+            <!-- Tables -->
+            <section class="lobby-section">
+                <h2>🃏 Tables actives</h2>
+                <div id="tablesList" class="tables-grid">
+                    <div class="loading">Chargement…</div>
                 </div>
-            </div>
+            </section>
         </div>
 
-        <!-- Tournament Details Modal -->
-        <div id="tournamentModal" class="modal"><div class="modal-content tournament-modal"><span class="close">&times;</span><div id="tournamentDetails"></div></div></div>
-        <!-- Tournament Tables Modal -->
-        <div id="tournamentTablesModal" class="modal"><div class="modal-content"><span class="close">&times;</span><h2>Tournament Tables</h2><div id="tournamentTablesList" class="tables-list"></div></div></div>
+        <!-- Chat sidebar -->
+        <aside class="lobby-chat">
+            <div class="chat-header">
+                💬 Chat Lobby
+                <button id="chatSettingsBtn" class="btn-small">⚙️</button>
+            </div>
+            <div class="chat-messages" id="chatMessages"></div>
+            <div class="chat-input-area">
+                <button id="smileyBtn" class="smiley-btn">😊</button>
+                <div id="smileyDropdown" class="smiley-dropdown"></div>
+                <input type="text" id="chatInput" placeholder="Message…" disabled maxlength="200">
+                <button id="chatSend" disabled>→</button>
+            </div>
+        </aside>
+
         <!-- Login Modal -->
-        <div id="loginModal" class="modal"><div class="modal-content"><span class="close">&times;</span><h2>Login</h2><form id="loginForm"><div class="form-group"><label>Username:</label><input type="text" id="loginUsername" required></div><div class="form-group"><label>Password:</label><input type="password" id="loginPassword" required></div><div class="form-group checkbox"><input type="checkbox" id="rememberMe"><label for="rememberMe">Remember me</label></div><button type="submit" class="btn-primary">Login</button></form></div></div>
+        <div id="loginModal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>Connexion</h2>
+                <form id="loginForm">
+                    <div class="form-group"><label>Pseudo :</label><input type="text" id="loginUsername" required></div>
+                    <div class="form-group"><label>Mot de passe :</label><input type="password" id="loginPassword" required></div>
+                    <div class="form-group"><label class="toggle-label"><input type="checkbox" id="rememberMe"> Se souvenir</label></div>
+                    <button type="submit" class="btn-primary">Connexion</button>
+                </form>
+            </div>
+        </div>
+
         <!-- Register Modal -->
-        <div id="registerModal" class="modal"><div class="modal-content"><span class="close">&times;</span><h2>Register</h2><form id="registerForm"><div class="form-group"><label>Username:</label><input type="text" id="regUsername" required></div><div class="form-group"><label>Email:</label><input type="email" id="regEmail"></div><div class="form-group"><label>Password:</label><input type="password" id="regPassword" required></div><button type="submit" class="btn-primary">Register</button></form></div></div>
+        <div id="registerModal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>Inscription</h2>
+                <form id="registerForm">
+                    <div class="form-group"><label>Pseudo :</label><input type="text" id="regUsername" required></div>
+                    <div class="form-group"><label>Email :</label><input type="email" id="regEmail"></div>
+                    <div class="form-group"><label>Mot de passe :</label><input type="password" id="regPassword" required></div>
+                    <button type="submit" class="btn-primary">Créer le compte</button>
+                </form>
+            </div>
+        </div>
+
         <!-- Options Modal -->
-        <div id="optionsModal" class="modal"><div class="modal-content"><span class="close">&times;</span><h2>⚙️ Settings</h2><div class="form-group"><label>Sound:</label><select id="soundSetting"><option value="on">On</option><option value="off">Off</option></select></div><div class="form-group"><label>Animation Speed:</label><select id="animationSpeed"><option value="fast">Fast</option><option value="normal">Normal</option><option value="slow">Slow</option></select></div><div class="form-group"><label>Card Display:</label><select id="cardDisplay"><option value="standard">Standard</option><option value="large">Large</option><option value="4color">4-Color</option></select></div><div class="form-group"><label>Auto Action:</label><select id="autoAction"><option value="never">Never</option><option value="check_fold">Check/Fold</option></select></div><div class="form-group"><label>Hand History:</label><select id="showHistory"><option value="all">All</option><option value="mine">Mine</option><option value="none">Hide</option></select></div><button id="saveSettings" class="btn-primary">Save</button></div></div>
-        <!-- Chat Settings Modal -->
-        <div id="chatSettingsModal" class="modal"><div class="modal-content"><span class="close">&times;</span><h2>Chat Settings</h2><div class="form-group"><label><input type="checkbox" id="hideJoinMessages"> Hide join/leave</label></div><div class="form-group"><label><input type="checkbox" id="autoConvertSmileys" checked> Auto smileys</label></div><button id="saveChatSettings" class="btn-primary">Save</button></div></div>
+        <div id="optionsModal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>⚙️ Préférences</h2>
+                <div class="form-group"><label>Son :</label><select id="soundSetting"><option value="on">Activé</option><option value="off">Désactivé</option></select></div>
+                <div class="form-group"><label>Vitesse animation :</label><select id="animationSpeed"><option value="fast">Rapide</option><option value="normal">Normal</option><option value="slow">Lent</option></select></div>
+                <div class="form-group"><label>Affichage cartes :</label><select id="cardDisplay"><option value="standard">Standard</option><option value="fourcolor">4 couleurs</option><option value="classic">Classique</option><option value="minimal">Minimal</option></select></div>
+                <div class="form-group"><label>Action auto :</label><select id="autoAction"><option value="never">Jamais</option><option value="check_fold">Check/Fold</option></select></div>
+                <div class="form-group"><label>Historique :</label><select id="showHistory"><option value="all">Tout</option><option value="mine">Mes mains</option><option value="none">Masqué</option></select></div>
+                <button id="saveSettings" class="btn-primary">Sauvegarder</button>
+            </div>
+        </div>
+
         <div id="toast" class="toast"></div>
     </div>
+
     <script src="/js/settings_manager.js"></script>
     <script src="/js/sound_manager.js"></script>
     <script src="/js/lobby.js"></script>

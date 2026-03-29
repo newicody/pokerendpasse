@@ -1,400 +1,386 @@
 /**
- * lobby.js — Lobby principal poker (freeroll tournaments)
- * Features: auth, tournois, chat, auto-redirect joueur, spectate par pseudo
+ * lobby.js — Logique du lobby PokerEndPasse
  */
-'use strict';
 
-let currentUser = null, isGuest = false, chatWs = null, _refreshInterval = null;
-const _clocks = {};
-let chatHideJoinMessages = false, chatAutoConvertSmileys = true;
+let currentUser = null;
+let chatWs = null;
+let chatReconnectTimer = null;
 
-// ══════════ UTILS ═══════════════════════════════════════════════════════════
-function esc(t) { const d = document.createElement('div'); d.textContent = t ?? ''; return d.innerHTML; }
-function fmtDate(iso) { if (!iso) return 'N/A'; try { return new Date(iso).toLocaleString(); } catch(_) { return iso; } }
-function fmtCountdown(s, short=false) {
-    if (s == null || s < 0) return '—'; s = Math.floor(s);
-    const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=s%60;
-    if (short) return h>0?`${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`:`${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
-    if (h>0) return `${h}h ${m}m`; if (m>0) return `${m}m ${sec}s`; return `${sec}s`;
-}
-function getOrdinal(n) { const s=['th','st','nd','rd'],v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
-function nowUTC() { return Date.now()/1000; }
-function isoToSec(iso) { if (!iso) return null; try { return new Date(iso).getTime()/1000; } catch(_) { return null; } }
+const $ = (id) => document.getElementById(id);
 
-function showToast(msg, type='info') {
-    if (typeof SoundManager !== 'undefined') SoundManager.play(type==='success'?'toast_success':type==='error'?'toast_error':'tick');
-    let t = document.getElementById('toast');
-    if (!t) { t = document.createElement('div'); t.id='toast'; t.className='toast'; document.body.appendChild(t); }
-    t.textContent = msg; t.className = `toast ${type} show`;
-    setTimeout(() => t.classList.remove('show'), 3000);
+// ══════════════════════════════════════════════════════════════════════════════
+// Init
+// ══════════════════════════════════════════════════════════════════════════════
+async function init() {
+    await checkAuth();
+    setupModals();
+    setupOptionsModal();
+    setupChat();
+    await loadTournaments();
+    await loadTables();
+    setInterval(loadTournaments, 15000);
+    setInterval(loadTables, 10000);
+    if (typeof SoundManager !== 'undefined') SoundManager.init();
 }
 
-function _startClock(k, fn) { _clearClock(k); fn(); _clocks[k] = setInterval(fn, 1000); }
-function _clearClock(k) { if (_clocks[k]) { clearInterval(_clocks[k]); delete _clocks[k]; } }
-function _clearClocksBy(pfx) { Object.keys(_clocks).filter(k=>k.startsWith(pfx)).forEach(_clearClock); }
-function closeModal(id) { const m=document.getElementById(id); if(m) m.style.display='none'; }
-window.closeModal = closeModal;
-window.showLoginModal = () => { const m=document.getElementById('loginModal'); if(m) m.style.display='flex'; };
-window.showRegisterModal = () => { const m=document.getElementById('registerModal'); if(m) m.style.display='flex'; };
-
-// ══════════ AUTH ════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+// Auth
+// ══════════════════════════════════════════════════════════════════════════════
 async function checkAuth() {
     try {
-        const r = await fetch('/api/auth/me');
-        if (r.ok) { const d = await r.json(); if (d?.id) { currentUser=d; isGuest=false; window.currentUser=d; updateUserDisplay(); document.getElementById('guestWarning')?.classList.add('hidden'); return; } }
-    } catch(_) {}
-    isGuest=true; currentUser=null; window.currentUser=null; updateUserDisplay();
-    document.getElementById('guestWarning')?.classList.remove('hidden');
+        const resp = await fetch('/api/auth/me');
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.authenticated && data.user) {
+                currentUser = data.user;
+                updateAuthUI();
+                return;
+            }
+        }
+    } catch (e) {}
+    currentUser = null;
+    updateAuthUI();
 }
 
-function updateUserDisplay() {
-    const u=document.getElementById('username'), st=document.getElementById('userStatus');
-    const lb=document.getElementById('loginBtn'), rb=document.getElementById('registerBtn'), lo=document.getElementById('logoutBtn');
-    const pl=document.getElementById('profileLink'), ab=document.getElementById('adminBtn'), av=document.getElementById('userAvatar');
-    if (currentUser && !isGuest) {
-        if(u) u.textContent=currentUser.username; if(st) st.textContent='Connected';
-        if(lb) lb.style.display='none'; if(rb) rb.style.display='none'; if(lo) lo.style.display='block';
-        if(pl) pl.style.display='inline-block'; if(ab) ab.style.display=currentUser.is_admin?'inline-block':'none';
-        if(av) { const src=currentUser.avatar?.startsWith('/uploads/')?currentUser.avatar:`/assets/images/avatars/${currentUser.avatar||'default'}.svg`; av.innerHTML=`<img src="${src}" style="width:40px;height:40px;border-radius:50%">`; }
+function updateAuthUI() {
+    const display = $('userDisplay');
+    const loginBtn = $('loginBtn');
+    const registerBtn = $('registerBtn');
+    const logoutBtn = $('logoutBtn');
+    const adminLink = $('adminLink');
+
+    if (currentUser) {
+        if (display) display.textContent = `👤 ${currentUser.username}`;
+        if (loginBtn) loginBtn.style.display = 'none';
+        if (registerBtn) registerBtn.style.display = 'none';
+        if (logoutBtn) logoutBtn.style.display = '';
+        if (adminLink) adminLink.style.display = currentUser.is_admin ? '' : 'none';
+        if ($('chatInput')) { $('chatInput').disabled = false; $('chatSend').disabled = false; }
     } else {
-        if(u) u.textContent='Guest'; if(st) st.textContent='Spectator';
-        if(lb) lb.style.display='block'; if(rb) rb.style.display='block'; if(lo) lo.style.display='none';
-        if(pl) pl.style.display='none'; if(ab) ab.style.display='none';
-        if(av) av.innerHTML='<div style="width:40px;height:40px;border-radius:50%;background:#555;display:flex;align-items:center;justify-content:center">👤</div>';
+        if (display) display.textContent = '';
+        if (loginBtn) loginBtn.style.display = '';
+        if (registerBtn) registerBtn.style.display = '';
+        if (logoutBtn) logoutBtn.style.display = 'none';
+        if (adminLink) adminLink.style.display = 'none';
     }
 }
 
-async function login(user, pass, remember=false) {
+async function login(username, password, remember) {
     try {
-        const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,password:pass,remember_me:remember})});
-        if(r.ok){const d=await r.json();currentUser=d.user;isGuest=false;window.currentUser=d.user;updateUserDisplay();closeModal('loginModal');showToast('Login OK!','success');document.getElementById('guestWarning')?.classList.add('hidden');initChat();await loadTournaments();}
-        else{const e=await r.json().catch(()=>({}));showToast(e.detail||'Login failed','error');}
-    }catch(_){showToast('Network error','error');}
+        const resp = await fetch('/api/auth/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, remember_me: remember }),
+        });
+        if (resp.ok) {
+            const data = await resp.json();
+            currentUser = data.user;
+            updateAuthUI();
+            closeModal('loginModal');
+            showToast('Connecté!', 'success');
+            connectChat();
+        } else {
+            const err = await resp.json().catch(() => ({}));
+            showToast(err.detail || 'Erreur de connexion', 'error');
+        }
+    } catch (e) { showToast('Erreur réseau', 'error'); }
 }
 
-async function register(user, pass, email) {
+async function register(username, password, email) {
     try {
-        const r=await fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,password:pass,email})});
-        if(r.ok){const d=await r.json();currentUser=d.user;isGuest=false;window.currentUser=d.user;updateUserDisplay();closeModal('registerModal');showToast('Registered!','success');document.getElementById('guestWarning')?.classList.add('hidden');initChat();await loadTournaments();}
-        else{const e=await r.json().catch(()=>({}));showToast(e.detail||'Registration failed','error');}
-    }catch(_){showToast('Network error','error');}
+        const resp = await fetch('/api/auth/register', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, email }),
+        });
+        if (resp.ok) {
+            closeModal('registerModal');
+            showToast('Compte créé! Connectez-vous.', 'success');
+        } else {
+            const err = await resp.json().catch(() => ({}));
+            showToast(err.detail || 'Erreur', 'error');
+        }
+    } catch (e) { showToast('Erreur réseau', 'error'); }
 }
 
 async function logout() {
-    try{await fetch('/api/auth/logout',{method:'POST'});}catch(_){}
-    currentUser=null;isGuest=true;window.currentUser=null;updateUserDisplay();
-    document.getElementById('guestWarning')?.classList.remove('hidden');
-    if(chatWs){chatWs.close();chatWs=null;} showToast('Logged out','info');
+    await fetch('/api/auth/logout', { method: 'POST' });
+    currentUser = null;
+    updateAuthUI();
+    showToast('Déconnecté', 'info');
 }
 
-// ══════════ TOURNAMENTS ════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+// Tournaments
+// ══════════════════════════════════════════════════════════════════════════════
 async function loadTournaments() {
     try {
-        const r=await fetch('/api/tournaments'); if(!r.ok) throw 0;
-        const all=await r.json();
-        renderActiveTournaments(all.filter(t=>t.status==='in_progress'));
-        renderUpcomingTournaments(all.filter(t=>t.status==='registration'||t.status==='starting'));
-        renderFinishedTournaments(all.filter(t=>t.status==='finished').slice(0,5));
-    } catch(e) { console.error('loadTournaments:', e); }
+        const resp = await fetch('/api/tournaments');
+        if (!resp.ok) return;
+        const tournaments = await resp.json();
+        renderTournaments(tournaments);
+    } catch (e) {}
 }
 
-function renderActiveTournaments(tournaments) {
-    const grid=document.getElementById('activeTournamentsGrid'); if(!grid) return;
-    _clearClocksBy('active_');
-    if (!tournaments.length) { grid.innerHTML='<div class="empty-state">No active tournaments</div>'; return; }
-    grid.innerHTML = tournaments.map(t => {
-        // Est-ce que JE suis inscrit dans ce tournoi actif ?
-        const myPlayer = currentUser ? (t.registered_players||t.players||[]).find(p=>p.user_id===currentUser.id && p.status==='registered') : null;
-        const myTableBtn = myPlayer?.table_id
-            ? `<button class="join-btn" onclick="event.stopPropagation(); window.goToMyTable('${t.id}')">🎮 Go to my table</button>`
-            : '';
-        return `
-        <div class="tournament-card tournament-card--active" onclick="showTournamentDetails('${t.id}')">
-            <div class="tournament-header">
-                <span class="tournament-name">🏆 ${esc(t.name)}</span>
-                <span class="tournament-status in_progress">🎲 In Progress</span>
-            </div>
-            <div class="tournament-details">
-                <div><span class="label">Players:</span><span class="value">${t.players_count}</span></div>
-                <div><span class="label">Level:</span><span class="value">${(t.current_level||0)+1}</span></div>
-                <div><span class="label">Blinds:</span><span class="value">${t.current_blinds?.small_blind??'?'}/${t.current_blinds?.big_blind??'?'}</span></div>
-                <div><span class="label">Prize:</span><span class="value">${(t.prize_pool||0).toLocaleString()}</span></div>
-            </div>
-            <div class="clock-bar"><span>⏱ Next level: </span><span id="blind-clock-${t.id}">—</span></div>
-            ${myTableBtn}
-            <button class="spectate-btn" onclick="event.stopPropagation(); window.showTournamentTables('${t.id}')">👁 Watch Tables</button>
-        </div>`;
-    }).join('');
-    tournaments.forEach(t => {
-        let secs = t.seconds_until_next_level ?? null;
-        _startClock(`active_${t.id}`, () => {
-            const el=document.getElementById(`blind-clock-${t.id}`); if(!el){_clearClock(`active_${t.id}`);return;}
-            if(secs===null){el.textContent='—';return;}
-            el.textContent=fmtCountdown(secs,true); el.style.color=secs<=30?'#e74c3c':secs<=60?'#ff9800':'#27ae60';
-            secs=Math.max(0,secs-1);
-        });
-    });
-}
+function renderTournaments(tournaments) {
+    const container = $('tournamentsList');
+    if (!container) return;
+    if (!tournaments.length) {
+        container.innerHTML = '<div class="loading">Aucun tournoi pour le moment</div>';
+        return;
+    }
+    container.innerHTML = tournaments.map(t => {
+        const statusClass = `status-${t.status}`;
+        const variantLabel = t.game_variant === 'plo' ? 'PLO' : "Hold'em";
+        const canReg = t.can_register && currentUser;
+        const isRegistered = t.registered_players?.some(p => p.user_id === currentUser?.id);
+        const timeInfo = t.time_until_start > 0
+            ? `Début dans ${Math.floor(t.time_until_start / 60)}min`
+            : (t.status === 'in_progress' ? `Niveau ${t.current_level + 1}` : '');
 
-function renderUpcomingTournaments(tournaments) {
-    const grid=document.getElementById('upcomingTournamentsGrid'); if(!grid) return;
-    _clearClocksBy('upcoming_');
-    if (!tournaments.length) { grid.innerHTML='<div class="empty-state">No upcoming tournaments</div>'; return; }
-    grid.innerHTML = tournaments.map(t => {
-        const isReg = currentUser && !isGuest && (t.registered_players||[]).some(p=>p.user_id===currentUser.id);
-        return `
-        <div class="tournament-card" onclick="showTournamentDetails('${t.id}')">
-            <div class="tournament-header">
-                <span class="tournament-name">📅 ${esc(t.name)}</span>
-                <span class="tournament-status registration">📝 Registration</span>
-            </div>
-            <div class="tournament-details">
-                <div><span class="label">Players:</span><span class="value">${t.players_count}/${t.max_players}</span></div>
-                <div><span class="label">Start:</span><span class="value">${fmtDate(t.start_time)}</span></div>
-                <div><span class="label">Prize Pool:</span><span class="value">${(t.prize_pool||0).toLocaleString()} (Freeroll)</span></div>
-            </div>
-            <div class="clock-bar"><span>⏰ Starts in: </span><span id="start-clock-${t.id}">—</span></div>
-            ${isReg
-                ? `<button class="join-btn" style="background:#e74c3c" onclick="event.stopPropagation();window.unregisterFromTournament('${t.id}')">❌ Cancel</button>`
-                : t.can_register
-                    ? `<button class="join-btn" onclick="event.stopPropagation();window.registerForTournament('${t.id}')">✅ Register (Free)</button>`
-                    : '<div style="text-align:center;padding:8px;opacity:0.6">Registration closed</div>'
+        let actionBtn = '';
+        if (t.status === 'registration') {
+            if (isRegistered) {
+                actionBtn = `<button class="btn-danger btn-small" onclick="unregisterTournament('${t.id}')">Se désinscrire</button>`;
+            } else if (canReg) {
+                actionBtn = `<button class="btn-success btn-small" onclick="registerTournament('${t.id}')">S'inscrire</button>`;
             }
+        }
+        if (t.status === 'in_progress' && isRegistered) {
+            actionBtn = `<button class="btn-primary btn-small" onclick="joinMyTable('${t.id}')">Rejoindre ma table</button>`;
+        }
+        const spectateBtn = t.status === 'in_progress' && t.tables?.length
+            ? `<a href="/table/${t.tables[0]}" class="btn-small">👁️ Regarder</a>` : '';
+
+        return `<div class="tournament-card">
+            <h3>${escapeHtml(t.name)} <span class="status-badge ${statusClass}">${t.status}</span></h3>
+            <div class="meta">
+                <span>🎮 ${variantLabel}</span>
+                <span>👥 ${t.players_count}/${t.max_players}</span>
+                <span>💰 ${t.prize_pool || 'Freeroll'}</span>
+            </div>
+            <div class="meta"><span>${timeInfo}</span></div>
+            ${t.current_blinds ? `<div class="meta"><span>Blinds: ${t.current_blinds.small_blind}/${t.current_blinds.big_blind}</span></div>` : ''}
+            <div class="actions">${actionBtn} ${spectateBtn}</div>
         </div>`;
     }).join('');
-    tournaments.forEach(t => {
-        const startSec=isoToSec(t.start_time);
-        _startClock(`upcoming_${t.id}`, () => {
-            const el=document.getElementById(`start-clock-${t.id}`); if(!el){_clearClock(`upcoming_${t.id}`);return;}
-            if(!startSec){el.textContent='—';return;} const d=startSec-nowUTC();
-            el.textContent=d>0?fmtCountdown(d):'Starting...'; el.style.color=d<60?'#e74c3c':d<300?'#ff9800':'#27ae60';
-        });
-    });
 }
 
-function renderFinishedTournaments(tournaments) {
-    const grid=document.getElementById('finishedTournamentsGrid'); if(!grid) return;
-    if (!tournaments.length) { grid.innerHTML='<div class="empty-state">No finished tournaments</div>'; return; }
-    grid.innerHTML = tournaments.map(t => `
-        <div class="tournament-card" onclick="showTournamentDetails('${t.id}')" style="opacity:0.7">
-            <div class="tournament-header">
-                <span class="tournament-name">🏁 ${esc(t.name)}</span>
-                <span class="tournament-status" style="background:rgba(150,150,150,0.3);color:#aaa">Finished</span>
-            </div>
-            <div class="tournament-details">
-                <div><span class="label">Players:</span><span class="value">${t.total_players||t.players_count}</span></div>
-                <div><span class="label">Prize:</span><span class="value">${(t.prize_pool||0).toLocaleString()}</span></div>
-            </div>
-        </div>`).join('');
-}
-
-// ══════════ GO TO MY TABLE (joueur inscrit) ═════════════════════════════════
-window.goToMyTable = async function(tournamentId) {
-    if (!currentUser || isGuest) { window.showLoginModal(); return; }
+async function registerTournament(tid) {
+    if (!currentUser) { showToast('Connectez-vous d\'abord', 'error'); return; }
     try {
-        const r = await fetch(`/api/tournaments/${tournamentId}/my-table`);
-        if (r.ok) {
-            const data = await r.json();
-            // Ouvrir en mode JOUEUR (pas spectateur !)
+        const resp = await fetch(`/api/tournaments/${tid}/register`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: currentUser.id }),
+        });
+        if (resp.ok) { showToast('Inscrit!', 'success'); loadTournaments(); }
+        else { const e = await resp.json(); showToast(e.detail || 'Erreur', 'error'); }
+    } catch (e) { showToast('Erreur', 'error'); }
+}
+
+async function unregisterTournament(tid) {
+    if (!currentUser) return;
+    try {
+        await fetch(`/api/tournaments/${tid}/unregister`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: currentUser.id }),
+        });
+        showToast('Désinscrit', 'info');
+        loadTournaments();
+    } catch (e) {}
+}
+
+async function joinMyTable(tid) {
+    if (!currentUser) return;
+    try {
+        const resp = await fetch(`/api/tournaments/${tid}/my-table?user_id=${currentUser.id}`);
+        if (resp.ok) {
+            const data = await resp.json();
             window.location.href = `/table/${data.table_id}`;
         } else {
-            showToast('Table not found', 'error');
+            showToast('Table introuvable', 'error');
         }
-    } catch(_) { showToast('Network error', 'error'); }
-};
+    } catch (e) { showToast('Erreur', 'error'); }
+}
 
-// ══════════ SPECTATE A SPECIFIC PLAYER ══════════════════════════════════════
-window.spectatePlayer = async function(tournamentId, userId) {
+// ══════════════════════════════════════════════════════════════════════════════
+// Tables
+// ══════════════════════════════════════════════════════════════════════════════
+async function loadTables() {
     try {
-        const r = await fetch(`/api/tournaments/${tournamentId}/player-table/${userId}`);
-        if (r.ok) {
-            const data = await r.json();
-            // Ouvrir dans un NOUVEL ONGLET en mode spectateur
-            window.open(`/table/${data.table_id}?spectate=true`, '_blank');
-        } else {
-            showToast('Player table not found', 'error');
-        }
-    } catch(_) { showToast('Network error', 'error'); }
-};
+        const resp = await fetch('/api/tables');
+        if (!resp.ok) return;
+        renderTables(await resp.json());
+    } catch (e) {}
+}
 
-// ══════════ TOURNAMENT DETAILS MODAL ═════════════════════════════════════════
-window.showTournamentDetails = async function(tournamentId) {
-    const modal=document.getElementById('tournamentModal'), detailsDiv=document.getElementById('tournamentDetails');
-    if(!modal||!detailsDiv) return;
-    detailsDiv.innerHTML='<div class="loading">Loading...</div>'; modal.style.display='flex';
-
-    try {
-        const r=await fetch(`/api/tournaments/${tournamentId}`); if(!r.ok) throw 0;
-        const t=await r.json();
-        const isRegistered = currentUser ? (t.registered_players||t.players||[]).some(p=>p.user_id===currentUser.id && p.status==='registered') : false;
-
-        const blindsHtml = (t.blind_structure||[]).map((b,i) => `
-            <div class="blind-level-item" ${i===t.current_level?'style="background:rgba(255,215,0,0.15);font-weight:bold"':''}>
-                <span class="level-num">${b.level||i+1}</span><span>${b.small_blind}/${b.big_blind}</span><span>${b.duration||10} min</span>
-            </div>`).join('') || '<div style="opacity:0.5">Default structure</div>';
-
-        // Joueurs avec lien spectate
-        const playersHtml = (t.registered_players||[]).map((p,i) => `
-            <div class="player-item" style="cursor:pointer" onclick="window.spectatePlayer('${t.id}','${p.user_id}')" title="Click to spectate ${esc(p.username)}">
-                <span>#${i+1} ${esc(p.username)} ${p.user_id===currentUser?.id?'(you)':''}</span>
-                <small>${p.chips ? p.chips.toLocaleString()+' chips' : ''} ${t.status==='in_progress'?'👁':''}  </small>
-            </div>`).join('') || '<div style="opacity:0.5">No players yet</div>';
-
-        const prizesHtml = (t.prizes||[]).map(p => `
-            <div class="prize-item"><span>${getOrdinal(p.rank)}</span><span>${p.amount?.toLocaleString()||0} (${p.percentage}%)</span></div>
-        `).join('') || '<div style="opacity:0.5">No prizes configured</div>';
-
-        const statusLabels = { registration:'📝 Registration', starting:'⚡ Starting...', in_progress:'🎲 In Progress', finished:'🏁 Finished', cancelled:'❌ Cancelled' };
-
-        // Action button
-        let actionHtml = '';
-        if (t.status === 'registration') {
-            if (isRegistered) actionHtml = `<button class="unregister-tournament-btn" onclick="window.unregisterFromTournament('${t.id}')">❌ Cancel Registration</button>`;
-            else if (t.can_register) actionHtml = `<button class="register-tournament-btn" onclick="window.registerForTournament('${t.id}')">✅ Register (Free Entry)</button>`;
-            else actionHtml = '<div class="status-message">Registration not available</div>';
-        } else if (t.status === 'in_progress') {
-            const myTableBtn = isRegistered ? `<button class="register-tournament-btn" onclick="window.goToMyTable('${t.id}')">🎮 Go to my table</button>` : '';
-            actionHtml = `${myTableBtn}<button class="spectate-tournament-btn" onclick="window.showTournamentTables('${t.id}')">👁 Watch Tables</button>`;
-        } else if (t.status === 'finished') {
-            actionHtml = '<div class="status-message">🏁 Tournament finished</div>';
-        }
-
-        detailsDiv.innerHTML = `
-            <div class="tournament-info-header"><h2>🏆 ${esc(t.name)}</h2><span class="tournament-status ${t.status}">${statusLabels[t.status]??t.status}</span></div>
-            ${t.description?`<p style="opacity:0.8;margin-bottom:15px">${esc(t.description)}</p>`:''}
-            <div class="tournament-timeline" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px">
-                <div><span style="opacity:0.6">Registration:</span><br>${fmtDate(t.registration_start)} — ${fmtDate(t.registration_end)}</div>
-                <div><span style="opacity:0.6">Start:</span><br>${fmtDate(t.start_time)}</div>
-                <div><span style="opacity:0.6">Players:</span><br>${t.players_count}/${t.max_players}</div>
-                <div><span style="opacity:0.6">Prize Pool:</span><br>${(t.prize_pool||0).toLocaleString()} (Freeroll)</div>
+function renderTables(tables) {
+    const container = $('tablesList');
+    if (!container) return;
+    if (!tables.length) {
+        container.innerHTML = '<div class="loading">Aucune table active</div>';
+        return;
+    }
+    container.innerHTML = tables.map(t => `
+        <div class="table-card">
+            <h3>${escapeHtml(t.name)}</h3>
+            <div class="meta">
+                <span>👥 ${t.players?.length || 0}/${t.max_players}</span>
+                <span>${t.game_variant === 'plo' ? 'PLO' : "Hold'em"}</span>
+                <span class="status-badge status-${t.status}">${t.status}</span>
             </div>
-            <div class="tournament-tabs" style="display:flex;gap:5px;border-bottom:1px solid rgba(255,215,0,0.3);margin-bottom:15px">
-                <button class="tab-btn active" data-tab="blinds">Blinds</button>
-                <button class="tab-btn" data-tab="players">Players (${t.players_count})</button>
-                <button class="tab-btn" data-tab="prizes">Prizes</button>
+            <div class="actions">
+                <a href="/table/${t.id}" class="btn-small">👁️ Voir</a>
             </div>
-            <div class="tournament-tab-content active" data-tab-content="blinds"><div class="blind-structure"><h4>Blind Structure</h4><div class="blind-structure-list">${blindsHtml}</div></div></div>
-            <div class="tournament-tab-content" data-tab-content="players"><div class="registered-players"><h4>Players ${t.status==='in_progress'?'<small>(click to spectate)</small>':''}</h4><div class="players-list">${playersHtml}</div></div></div>
-            <div class="tournament-tab-content" data-tab-content="prizes"><div class="prize-structure"><h4>Prize Structure (Freeroll)</h4><div class="prize-list">${prizesHtml}</div></div></div>
-            <div style="margin-top:20px">${actionHtml}</div>`;
-
-        // Bind tabs
-        const btns=detailsDiv.querySelectorAll('.tab-btn'), panes=detailsDiv.querySelectorAll('.tournament-tab-content');
-        btns.forEach(b=>{b.onclick=()=>{const id=b.dataset.tab;btns.forEach(x=>x.classList.toggle('active',x.dataset.tab===id));panes.forEach(p=>p.classList.toggle('active',p.dataset.tabContent===id));};});
-    } catch(e) { detailsDiv.innerHTML='<div class="error">Failed to load details</div>'; }
-};
-
-// ══════════ TOURNAMENT ACTIONS ═══════════════════════════════════════════════
-window.registerForTournament = async function(id) {
-    if(!currentUser||isGuest){window.showLoginModal();return;}
-    try{const r=await fetch(`/api/tournaments/${id}/register`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:currentUser.id})});
-    if(r.ok){showToast('Registered!','success');closeModal('tournamentModal');await loadTournaments();}
-    else{const e=await r.json().catch(()=>({}));showToast(e.detail||'Failed','error');}}
-    catch(_){showToast('Network error','error');}
-};
-
-window.unregisterFromTournament = async function(id) {
-    if(!confirm('Cancel registration?')) return;
-    try{const r=await fetch(`/api/tournaments/${id}/unregister`,{method:'POST',headers:{'Content-Type':'application/json'}});
-    if(r.ok){showToast('Cancelled','info');closeModal('tournamentModal');await loadTournaments();}
-    else showToast('Failed','error');}catch(_){showToast('Network error','error');}
-};
-
-window.showTournamentTables = async function(id) {
-    try{const r=await fetch(`/api/tournaments/${id}/tables`);if(!r.ok)throw 0;const tables=await r.json();
-    const modal=document.getElementById('tournamentTablesModal'),list=document.getElementById('tournamentTablesList');
-    if(!modal||!list) return;
-    list.innerHTML = tables.length ? tables.map(tb=>`<div class="table-item"><div><strong>🎲 ${esc(tb.name)}</strong><small>${tb.current_players}/${tb.max_players} players</small></div><button class="watch-table-btn" onclick="window.open('/table/${tb.id}?spectate=true','_blank')">👁 Watch</button></div>`).join('')
-        : '<div class="empty-state">No tables</div>';
-    modal.style.display='flex';}catch(_){showToast('Could not load tables','error');}
-};
-
-// ══════════ CHAT ════════════════════════════════════════════════════════════
-function initChat() {
-    if(!currentUser||isGuest||chatWs?.readyState===WebSocket.OPEN) return;
-    const url=`${location.protocol==='https:'?'wss:':'ws:'}//${location.host}/ws/chat`;
-    try{
-        chatWs=new WebSocket(url);
-        chatWs.onopen=()=>{chatWs.send(JSON.stringify({type:'join',user_id:currentUser.id,username:currentUser.username}));const i=document.getElementById('chatInput'),b=document.getElementById('chatSendBtn');if(i)i.disabled=false;if(b)b.disabled=false;};
-        chatWs.onmessage=e=>{try{const m=JSON.parse(e.data);handleChatMsg(m);}catch(_){}};
-        chatWs.onclose=()=>{const i=document.getElementById('chatInput'),b=document.getElementById('chatSendBtn');if(i)i.disabled=true;if(b)b.disabled=true;setTimeout(()=>{if(currentUser&&!isGuest)initChat();},5000);};
-    }catch(_){}
+        </div>
+    `).join('');
 }
 
-function handleChatMsg(m) {
-    if(m.type==='system'){if(chatHideJoinMessages&&(m.message?.includes('joined')||m.message?.includes('left')))return;addChat(null,m.message,'system');if(m.user_count!==undefined){const e=document.getElementById('chatUserCount');if(e)e.textContent=`${m.user_count} online`;}}
-    else if(m.type==='message') addChat(m.username,m.message,m.user_id===currentUser?.id?'self':'user');
-}
+// ══════════════════════════════════════════════════════════════════════════════
+// Chat
+// ══════════════════════════════════════════════════════════════════════════════
+function setupChat() {
+    const input = $('chatInput');
+    const btn = $('chatSend');
+    if (!input || !btn) return;
 
-function addChat(user, msg, type='user') {
-    const c=document.getElementById('chatMessages'); if(!c) return;
-    const d=document.createElement('div'); d.className=`chat-message ${type}`;
-    const time=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-    if(type==='system') d.innerHTML=`<span class="time">[${time}]</span> ${esc(msg)}`;
-    else { let text=esc(msg); if(chatAutoConvertSmileys) text=text.replace(/:\)/g,'😊').replace(/;\)/g,'😉').replace(/:D/g,'😃').replace(/:\(/g,'😢').replace(/:P/g,'😛').replace(/<3/g,'❤️');
-        d.innerHTML=`<span class="username">${esc(user)}</span><span class="time">[${time}]</span><span class="message-text">${text}</span>`; }
-    c.appendChild(d); d.scrollIntoView({behavior:'smooth'});
-    while(c.children.length>200) c.removeChild(c.firstChild);
-}
-
-function sendChat() {
-    const i=document.getElementById('chatInput'); if(!i||!chatWs||chatWs.readyState!==WebSocket.OPEN) return;
-    const t=i.value.trim(); if(!t) return;
-    chatWs.send(JSON.stringify({type:'message',message:t})); i.value='';
-}
-
-// ══════════ EVENT LISTENERS ═════════════════════════════════════════════════
-function setupAuthModals() {
-    document.getElementById('loginForm')?.addEventListener('submit',e=>{e.preventDefault();login(document.getElementById('loginUsername').value,document.getElementById('loginPassword').value,document.getElementById('rememberMe')?.checked);});
-    document.getElementById('registerForm')?.addEventListener('submit',e=>{e.preventDefault();register(document.getElementById('regUsername').value,document.getElementById('regPassword').value,document.getElementById('regEmail')?.value);});
-    document.querySelectorAll('.modal .close').forEach(b=>{b.onclick=()=>b.closest('.modal').style.display='none';});
-    window.addEventListener('click',e=>{if(e.target.classList.contains('modal'))e.target.style.display='none';});
-}
-
-function setupEventListeners() {
-    document.getElementById('loginBtn')?.addEventListener('click',window.showLoginModal);
-    document.getElementById('registerBtn')?.addEventListener('click',window.showRegisterModal);
-    document.getElementById('logoutBtn')?.addEventListener('click',logout);
-    document.getElementById('chatSendBtn')?.addEventListener('click',sendChat);
-    document.getElementById('chatInput')?.addEventListener('keydown',e=>{if(e.key==='Enter')sendChat();});
-
-    // Chat settings
-    document.getElementById('chatSettingsBtn')?.addEventListener('click',()=>{const m=document.getElementById('chatSettingsModal');if(m){document.getElementById('hideJoinMessages').checked=chatHideJoinMessages;document.getElementById('autoConvertSmileys').checked=chatAutoConvertSmileys;m.style.display='flex';}});
-    document.getElementById('saveChatSettings')?.addEventListener('click',()=>{chatHideJoinMessages=document.getElementById('hideJoinMessages')?.checked??false;chatAutoConvertSmileys=document.getElementById('autoConvertSmileys')?.checked??true;try{localStorage.setItem('poker_chat_settings',JSON.stringify({chatHideJoinMessages,chatAutoConvertSmileys}));}catch(_){}closeModal('chatSettingsModal');showToast('Saved','success');});
-    try{const s=JSON.parse(localStorage.getItem('poker_chat_settings')||'{}');chatHideJoinMessages=s.chatHideJoinMessages??false;chatAutoConvertSmileys=s.chatAutoConvertSmileys??true;}catch(_){}
+    const send = () => {
+        const text = input.value.trim();
+        if (!text || !chatWs || chatWs.readyState !== WebSocket.OPEN) return;
+        chatWs.send(JSON.stringify({ type: 'message', message: text }));
+        input.value = '';
+    };
+    btn.addEventListener('click', send);
+    input.addEventListener('keypress', (e) => { if (e.key === 'Enter') send(); });
 
     // Smileys
-    const sBtn=document.getElementById('smileyBtn'),sDrop=document.getElementById('smileyDropdown');
-    if(sBtn&&sDrop){
-        const emojis=['😊','😂','🤣','😍','🤔','😎','🙄','😢','😡','🎉','👍','👎','🔥','💰','🃏','♠️','♥️','♣️','♦️','🏆','😏','🤑','😤','🥳','🤯','💀','🎲','🍀','⭐','💎'];
-        sDrop.innerHTML=emojis.map(e=>`<span class="emoji-item">${e}</span>`).join('');
-        sBtn.addEventListener('click',e=>{e.stopPropagation();sDrop.classList.toggle('visible');});
-        sDrop.addEventListener('click',e=>{if(e.target.classList.contains('emoji-item')){const i=document.getElementById('chatInput');if(i){i.value+=e.target.textContent;i.focus();}sDrop.classList.remove('visible');}});
-        document.addEventListener('click',e=>{if(!sBtn.contains(e.target)&&!sDrop.contains(e.target))sDrop.classList.remove('visible');});
+    const sBtn = $('smileyBtn');
+    const sDrop = $('smileyDropdown');
+    if (sBtn && sDrop) {
+        const emojis = ['😊','😂','🤣','😍','🤔','😎','🙄','😢','😡','🎉','👍','👎','🔥','💰','🃏','♠️','♥️','♣️','♦️','🏆','😏','🤑','😤','🥳'];
+        sDrop.innerHTML = emojis.map(e => `<span class="emoji-item">${e}</span>`).join('');
+        sBtn.addEventListener('click', (e) => { e.stopPropagation(); sDrop.classList.toggle('visible'); });
+        sDrop.addEventListener('click', (e) => {
+            if (e.target.classList.contains('emoji-item') && input) {
+                input.value += e.target.textContent;
+                input.focus();
+                sDrop.classList.remove('visible');
+            }
+        });
+        document.addEventListener('click', () => sDrop.classList.remove('visible'));
     }
+
+    connectChat();
+}
+
+function connectChat() {
+    if (!currentUser) return;
+    if (chatWs && (chatWs.readyState === 0 || chatWs.readyState === 1)) return;
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    chatWs = new WebSocket(`${proto}//${location.host}/ws/chat`);
+    chatWs.onopen = () => {
+        chatWs.send(JSON.stringify({ type: 'join', user_id: currentUser.id, username: currentUser.username }));
+    };
+    chatWs.onmessage = (e) => {
+        try { handleChatMessage(JSON.parse(e.data)); } catch (err) {}
+    };
+    chatWs.onclose = () => {
+        chatReconnectTimer = setTimeout(connectChat, 5000);
+    };
+}
+
+function handleChatMessage(msg) {
+    const container = $('chatMessages');
+    if (!container) return;
+    const div = document.createElement('div');
+    div.className = 'msg';
+    if (msg.type === 'system') {
+        div.className += ' msg-system';
+        div.textContent = msg.message;
+    } else if (msg.type === 'message') {
+        div.innerHTML = `<span class="msg-user">${escapeHtml(msg.username)}</span>: ${escapeHtml(msg.message)}`;
+    }
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Modals
+// ══════════════════════════════════════════════════════════════════════════════
+function setupModals() {
+    $('loginBtn')?.addEventListener('click', () => openModal('loginModal'));
+    $('registerBtn')?.addEventListener('click', () => openModal('registerModal'));
+    $('logoutBtn')?.addEventListener('click', logout);
+
+    $('loginForm')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        login($('loginUsername').value, $('loginPassword').value, $('rememberMe')?.checked);
+    });
+    $('registerForm')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        register($('regUsername').value, $('regPassword').value, $('regEmail')?.value);
+    });
+
+    document.querySelectorAll('.modal .close').forEach(btn => {
+        btn.addEventListener('click', () => btn.closest('.modal').style.display = 'none');
+    });
+    window.addEventListener('click', (e) => {
+        if (e.target.classList.contains('modal')) e.target.style.display = 'none';
+    });
 }
 
 function setupOptionsModal() {
-    const ob=document.getElementById('optionsBtn'),om=document.getElementById('optionsModal'),sb=document.getElementById('saveSettings');
-    if(ob) ob.onclick=()=>{if(typeof SettingsManager!=='undefined'){const s=SettingsManager.load();['soundSetting','animationSpeed','cardDisplay','autoAction','showHistory'].forEach(id=>{const el=document.getElementById(id);const key=id==='soundSetting'?'sound':id;if(el&&s[key]!==undefined)el.value=s[key];});}if(om)om.style.display='flex';};
-    if(sb) sb.onclick=()=>{const ns={sound:document.getElementById('soundSetting')?.value||'on',animationSpeed:document.getElementById('animationSpeed')?.value||'normal',cardDisplay:document.getElementById('cardDisplay')?.value||'standard',autoAction:document.getElementById('autoAction')?.value||'never',showHistory:document.getElementById('showHistory')?.value||'all'};if(typeof SettingsManager!=='undefined')SettingsManager.save(ns);if(typeof SoundManager!=='undefined')SoundManager.loadPreferences();closeModal('optionsModal');showToast('Settings saved!','success');};
+    $('optionsBtn')?.addEventListener('click', () => {
+        if (typeof SettingsManager !== 'undefined') {
+            const s = SettingsManager.load();
+            const map = { soundSetting: 'sound', animationSpeed: 'animationSpeed',
+                          cardDisplay: 'cardDisplay', autoAction: 'autoAction', showHistory: 'showHistory' };
+            for (const [elId, key] of Object.entries(map)) {
+                const el = $(elId);
+                if (el && s[key] !== undefined) el.value = s[key];
+            }
+        }
+        openModal('optionsModal');
+    });
+
+    $('saveSettings')?.addEventListener('click', () => {
+        const ns = {
+            sound: $('soundSetting')?.value || 'on',
+            animationSpeed: $('animationSpeed')?.value || 'normal',
+            cardDisplay: $('cardDisplay')?.value || 'standard',
+            autoAction: $('autoAction')?.value || 'never',
+            showHistory: $('showHistory')?.value || 'all',
+        };
+        if (typeof SettingsManager !== 'undefined') SettingsManager.save(ns);
+        if (typeof SoundManager !== 'undefined') SoundManager.loadPreferences();
+        closeModal('optionsModal');
+        showToast('Préférences sauvegardées', 'success');
+    });
 }
 
-function _startServerClock() {
-    async function u(){try{const r=await fetch('/api/server/time');if(r.ok){const d=await r.json();const e=document.getElementById('serverTime');if(e)e.textContent=d.time||'--:--:--';}}catch(_){}}
-    u(); setInterval(u,5000);
+function openModal(id) { const m = $(id); if (m) m.style.display = 'flex'; }
+function closeModal(id) { const m = $(id); if (m) m.style.display = 'none'; }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Utils
+// ══════════════════════════════════════════════════════════════════════════════
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text || '';
+    return div.innerHTML;
 }
 
-// ══════════ INIT ════════════════════════════════════════════════════════════
-async function init() {
-    if(typeof SoundManager!=='undefined') SoundManager.init();
-    await checkAuth(); await loadTournaments();
-    if(_refreshInterval) clearInterval(_refreshInterval);
-    _refreshInterval = setInterval(loadTournaments, 8000);
-    setupEventListeners(); setupAuthModals(); setupOptionsModal(); _startServerClock();
-    if(!isGuest) initChat();
+function showToast(message, type = 'info') {
+    let container = $('toastContainer') || (() => {
+        const c = document.createElement('div');
+        c.id = 'toastContainer'; c.className = 'toast-container';
+        document.body.appendChild(c); return c;
+    })();
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = message;
+    container.appendChild(el);
+    setTimeout(() => el.classList.add('show'), 10);
+    setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 300); }, 3000);
 }
 
-window.initCurrentUser = async function() { await checkAuth(); return window.currentUser; };
-
-if (document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
+// Start
+document.addEventListener('DOMContentLoaded', init);

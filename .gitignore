@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtualenv
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (runtime)
+data/sessions/
+data/table_states/
+data/deck_commitments/
+logs/
+
+# Uploads
+frontend/assets/uploads/avatars/*.jpg
+frontend/assets/uploads/avatars/*.png
+frontend/assets/uploads/avatars/*.gif
+!frontend/assets/avatars/default.svg
+
+# Node (si mental-poker-toolkit est gardé)
+node_modules/
+package-lock.json

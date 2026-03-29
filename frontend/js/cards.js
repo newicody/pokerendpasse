@@ -1,87 +1,67 @@
 /**
  * cards.js — Module de rendu des cartes
- * Gère l'affichage des cartes de poker (grandes et mini).
- * Toujours fond blanc pour les cartes face visible, peu importe le thème.
+ * Support multi-decks : standard, fourcolor, classic, minimal
  */
-'use strict';
+const CardsModule = (() => {
+    let currentDeck = 'standard';
 
-window.Cards = (() => {
-
-    // Table de correspondance couleur → symbole et classe CSS
     const SUITS = {
-        h: { sym: '♥', cls: 'hearts' },
-        d: { sym: '♦', cls: 'diamonds' },
-        c: { sym: '♣', cls: 'clubs'  },
-        s: { sym: '♠', cls: 'spades' },
+        h: { symbol: '♥', name: 'hearts' },
+        d: { symbol: '♦', name: 'diamonds' },
+        c: { symbol: '♣', name: 'clubs' },
+        s: { symbol: '♠', name: 'spades' },
     };
 
-    // Affichage des rangs (T → 10, lettres restent)
-    const RANK_DISPLAY = { T: '10', J: 'J', Q: 'Q', K: 'K', A: 'A' };
+    // Couleurs par deck et suit
+    const COLORS = {
+        standard:  { h: '#e74c3c', d: '#e74c3c', c: '#2c3e50', s: '#2c3e50' },
+        fourcolor: { h: '#e74c3c', d: '#3498db', c: '#27ae60', s: '#2c3e50' },
+        classic:   { h: '#c0392b', d: '#c0392b', c: '#1a1a2e', s: '#1a1a2e' },
+        minimal:   { h: '#666', d: '#666', c: '#333', s: '#333' },
+    };
 
-    /**
-     * Parse une carte string (ex: "Ah", "Td", "2c") en objet {rank, suit}.
-     * Retourne null si la carte est invalide ou dos.
-     */
-    function parse(card) {
-        if (!card || card === 'back' || card.length < 2) return null;
-        const suitChar = card.slice(-1);
-        const rankChar = card.slice(0, -1);
-        const suit = SUITS[suitChar];
-        if (!suit) return null;
-        return {
-            rank: RANK_DISPLAY[rankChar] || rankChar,
-            suit,
-        };
+    const RANK_DISPLAY = {
+        '2': '2', '3': '3', '4': '4', '5': '5', '6': '6', '7': '7',
+        '8': '8', '9': '9', 'T': '10', 'J': 'J', 'Q': 'Q', 'K': 'K', 'A': 'A',
+    };
+
+    function parseCard(code) {
+        if (!code || code.length < 2) return null;
+        const rank = code[0];
+        const suit = code[1];
+        return { rank, suit, display: RANK_DISPLAY[rank] || rank };
     }
 
-    return {
-        /**
-         * Grande carte (community cards, mes cartes en bas).
-         * Toujours fond blanc.
-         */
-        html(card) {
-            const p = parse(card);
-            if (!p) {
-                // Carte dos
-                return `<div class="card-back-face">
-                    <div class="card-back-pattern"></div>
-                </div>`;
-            }
-            return `<div class="card-face ${p.suit.cls}">
-                <span class="cf-tl">${p.rank}<br>${p.suit.sym}</span>
-                <span class="cf-mid">${p.suit.sym}</span>
-                <span class="cf-br">${p.suit.sym}<br>${p.rank}</span>
-            </div>`;
-        },
+    function renderCard(code, faceDown = false) {
+        if (faceDown || !code) {
+            return `<div class="card card-back"><div class="card-back-design">🂠</div></div>`;
+        }
+        const c = parseCard(code);
+        if (!c) return `<div class="card card-unknown">?</div>`;
 
-        /**
-         * Mini carte pour les sièges joueurs.
-         * @param {string} card  - code carte ou null
-         * @param {boolean} back - forcer l'affichage dos
-         */
-        mini(card, back = false) {
-            if (back || !card) {
-                return `<span class="card-mini back">🂠</span>`;
-            }
-            const p = parse(card);
-            if (!p) return `<span class="card-mini back">🂠</span>`;
-            return `<span class="card-mini ${p.suit.cls}">${p.rank}${p.suit.sym}</span>`;
-        },
+        const suitInfo = SUITS[c.suit] || { symbol: '?', name: 'unknown' };
+        const color = (COLORS[currentDeck] || COLORS.standard)[c.suit] || '#333';
 
-        /**
-         * Vérifie si une carte est valide.
-         */
-        isValid(card) {
-            return parse(card) !== null;
-        },
+        return `<div class="card card-face ${suitInfo.name}" style="color:${color}">
+            <div class="card-corner top-left">
+                <span class="card-rank">${c.display}</span>
+                <span class="card-suit">${suitInfo.symbol}</span>
+            </div>
+            <div class="card-center">${suitInfo.symbol}</div>
+            <div class="card-corner bottom-right">
+                <span class="card-rank">${c.display}</span>
+                <span class="card-suit">${suitInfo.symbol}</span>
+            </div>
+        </div>`;
+    }
 
-        /**
-         * Retourne la classe CSS de couleur pour une carte.
-         */
-        suitClass(card) {
-            if (!card) return '';
-            const p = parse(card);
-            return p ? p.suit.cls : '';
-        },
-    };
+    function setDeck(deckName) {
+        if (COLORS[deckName]) currentDeck = deckName;
+    }
+
+    function getDeck() { return currentDeck; }
+
+    return { renderCard, setDeck, getDeck, parseCard };
 })();
+
+window.CardsModule = CardsModule;

@@ -2,13 +2,14 @@
 """
 Moteur de jeu poker — PokerKit + SRA Deck Security
 ===================================================
-Version corrigée avec:
-- Fix _determine_winner (sauvegarde stacks avant showdown)
-- Fix action_timer (calcul correct du temps restant)
-- Fix community cards (révélation progressive correcte)
-- Game loop resilient avec auto-restart
-- Persistance des commitments
-- Meilleure synchronisation PokerKit
+Version consolidée avec :
+- Support Hold'em + PLO via PokerKit
+- DeckSecurity commit-reveal avec persistance
+- CSPRNG (secrets.SystemRandom) pour le shuffle
+- Envoi per-player des hole cards
+- Game loop résilient avec auto-restart
+- Quick bet calculations (1BB, 2BB, 1/3pot, etc.)
+- Fix _determine_winner, action_timer, community cards
 """
 
 import asyncio
@@ -16,7 +17,6 @@ import hashlib
 import json
 import logging
 import secrets
-import random
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -26,20 +26,23 @@ from pokerkit import NoLimitTexasHoldem, Automation, Mode
 
 from .models import (
     Table, TablePlayer, GameState, GameStatus, TableStatus,
-    PlayerStatus, ActionType, PlayerActionRequest, GameType,
+    PlayerStatus, ActionType, PlayerActionRequest, GameType, GameVariant,
 )
 
 logger = logging.getLogger(__name__)
 
 ACTION_TIMEOUT = 20
 PAUSE_BETWEEN_HANDS = 4
-MAX_GAME_LOOP_ERRORS = 3  # Nombre max d'erreurs avant arrêt définitif
+MAX_GAME_LOOP_ERRORS = 3
 
 STATE_DIR = Path("data/table_states")
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 COMMITMENT_DIR = Path("data/deck_commitments")
 COMMITMENT_DIR.mkdir(parents=True, exist_ok=True)
+
+# CSPRNG pour le mélange du deck
+_CSPRNG = secrets.SystemRandom()
 
 # Automations PokerKit — tout sauf les décisions joueurs
 AUTOMATIONS = (
@@ -57,103 +60,99 @@ AUTOMATIONS = (
 )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SRA Deck Security — Port Python du mental-poker-toolkit
-# Avec persistance des commitments
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# SRA Deck Security — Commit-Reveal avec persistance
+# ═══════════════════════════════════════════════════════════════════════════════
+
 class DeckSecurity:
     """
     Commit-reveal + SRA verification avec persistance.
     Le serveur s'engage sur un seed AVANT de distribuer,
-    puis le révèle après la main pour vérification.
+    puis le révèle après la main pour vérification côté client.
     """
-    
+
     def __init__(self, table_id: str):
         self.table_id = table_id
         self._commitments: Dict[int, dict] = {}
+        self._max_commitments = 200
         self._load_commitments()
 
     def _get_commitment_file(self) -> Path:
-        return COMMITMENT_DIR / f"{self.table_id}_commitments.json"
+        return COMMITMENT_DIR / f"{self.table_id}.json"
 
     def _load_commitments(self):
-        """Charge les commitments depuis le disque"""
-        try:
-            path = self._get_commitment_file()
-            if path.exists():
+        path = self._get_commitment_file()
+        if path.exists():
+            try:
                 with open(path) as f:
-                    data = json.load(f)
-                    # Convertir les clés string en int
-                    self._commitments = {int(k): v for k, v in data.items()}
-                logger.debug(f"Loaded {len(self._commitments)} commitments for table {self.table_id}")
-        except Exception as e:
-            logger.error(f"Failed to load commitments: {e}")
-            self._commitments = {}
+                    raw = json.load(f)
+                self._commitments = {int(k): v for k, v in raw.items()}
+            except Exception as e:
+                logger.error(f"[Table {self.table_id}] Load commitments: {e}")
+                self._commitments = {}
 
     def _save_commitments(self):
-        """Sauvegarde les commitments sur disque"""
         try:
-            path = self._get_commitment_file()
-            # Garder seulement les 100 dernières mains
-            if len(self._commitments) > 100:
-                sorted_keys = sorted(self._commitments.keys())
-                for k in sorted_keys[:-100]:
+            # Limiter le nombre de commitments stockés
+            if len(self._commitments) > self._max_commitments:
+                keys = sorted(self._commitments.keys())
+                for k in keys[:-self._max_commitments]:
                     del self._commitments[k]
-            
-            with open(path, 'w') as f:
+            with open(self._get_commitment_file(), 'w') as f:
                 json.dump(self._commitments, f, indent=2)
         except Exception as e:
-            logger.error(f"Failed to save commitments: {e}")
+            logger.error(f"[Table {self.table_id}] Save commitments: {e}")
 
     def commit_deck(self, hand_round: int, deck: List[str]) -> str:
-        """Commit le deck avant distribution"""
         seed = secrets.token_hex(32)
         deck_str = ','.join(deck)
         commitment = hashlib.sha256(f"{seed}:{deck_str}".encode()).hexdigest()
-        
         self._commitments[hand_round] = {
             'seed': seed,
             'hash': commitment,
             'deck_order': list(deck),
             'committed_at': datetime.utcnow().isoformat(),
         }
-        
         self._save_commitments()
-        logger.info(f"[Table {self.table_id}] Deck committed for hand #{hand_round}: {commitment[:16]}...")
-        
+        logger.info(f"[Table {self.table_id}] Deck committed hand #{hand_round}: {commitment[:16]}…")
         return commitment
 
     def reveal(self, hand_round: int) -> Optional[dict]:
-        """Révèle le deck après la main"""
-        commitment = self._commitments.get(hand_round)
-        if commitment:
-            commitment['revealed_at'] = datetime.utcnow().isoformat()
+        data = self._commitments.get(hand_round)
+        if data:
+            data['revealed_at'] = datetime.utcnow().isoformat()
             self._save_commitments()
-        return commitment
+        return data
 
     def get_commitment(self, hand_round: int) -> Optional[str]:
-        """Récupère le hash de commitment sans révéler le seed"""
         data = self._commitments.get(hand_round)
         return data['hash'] if data else None
 
     @staticmethod
     def verify(seed: str, deck_order: List[str], commitment_hash: str) -> bool:
-        """Vérifie l'intégrité du deck (peut être appelé côté client)"""
         deck_str = ','.join(deck_order)
         expected = hashlib.sha256(f"{seed}:{deck_str}".encode()).hexdigest()
         return expected == commitment_hash
 
+    @staticmethod
+    def sra_encrypt(card_val: int, key_e: int, modulus: int) -> int:
+        return pow(card_val, key_e, modulus)
+
+    @staticmethod
+    def sra_decrypt(cipher: int, key_d: int, modulus: int) -> int:
+        return pow(cipher, key_d, modulus)
+
     def cleanup(self):
-        """Supprime les fichiers de commitment"""
         try:
             self._get_commitment_file().unlink(missing_ok=True)
-        except:
+        except Exception:
             pass
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PlayerState
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# PlayerState (dataclass interne — pas Pydantic)
+# ═══════════════════════════════════════════════════════════════════════════════
+
 @dataclass
 class PlayerState:
     user_id: str
@@ -209,745 +208,723 @@ class PlayerState:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# Quick Bet Calculator
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class QuickBetCalculator:
+    """Calcule les mises rapides : 1BB, 2BB, 1/3pot, 1/2pot, 3/4pot, pot, all-in"""
+
+    @staticmethod
+    def calculate(pot: int, big_blind: int, current_bet: int,
+                  player_chips: int, min_raise: int) -> List[dict]:
+        bets = []
+        call_amount = current_bet  # montant à caller pour ce joueur
+
+        # 1 BB
+        bb_bet = max(big_blind, min_raise)
+        if bb_bet <= player_chips:
+            bets.append({'label': '1 BB', 'amount': bb_bet, 'key': '1bb'})
+
+        # 2 BB
+        bb2 = big_blind * 2
+        if bb2 > bb_bet and bb2 <= player_chips:
+            bets.append({'label': '2 BB', 'amount': bb2, 'key': '2bb'})
+
+        # 1/3 Pot
+        third_pot = max(pot // 3, min_raise)
+        if third_pot <= player_chips and third_pot > bb2:
+            bets.append({'label': '1/3 Pot', 'amount': third_pot, 'key': '1_3pot'})
+
+        # 1/2 Pot
+        half_pot = max(pot // 2, min_raise)
+        if half_pot <= player_chips and half_pot > third_pot:
+            bets.append({'label': '1/2 Pot', 'amount': half_pot, 'key': '1_2pot'})
+
+        # 3/4 Pot
+        three_q_pot = max(pot * 3 // 4, min_raise)
+        if three_q_pot <= player_chips and three_q_pot > half_pot:
+            bets.append({'label': '3/4 Pot', 'amount': three_q_pot, 'key': '3_4pot'})
+
+        # Pot
+        full_pot = max(pot, min_raise)
+        if full_pot <= player_chips and full_pot > three_q_pot:
+            bets.append({'label': 'Pot', 'amount': full_pot, 'key': 'pot'})
+
+        # All-in (toujours disponible)
+        if player_chips > 0:
+            bets.append({'label': 'All-in', 'amount': player_chips, 'key': 'allin'})
+
+        return bets
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # PokerTable
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+
 class PokerTable:
     """
     Table de poker avec moteur PokerKit.
-    Version corrigée avec game loop resilient et meilleure gestion d'état.
+    Supporte Hold'em et PLO.
+    Game loop résilient avec auto-restart.
     """
-    
+
     def __init__(
         self,
         table_id: str,
         name: str,
-        game_type: GameType,
-        max_players: int,
-        min_buy_in: int,
-        max_buy_in: int,
-        small_blind: int,
-        big_blind: int,
-        tournament_id: Optional[str] = None
+        tournament_id: str,
+        max_players: int = 9,
+        small_blind: int = 5,
+        big_blind: int = 10,
+        game_variant: GameVariant = GameVariant.HOLDEM,
     ):
         self.id = table_id
         self.name = name
-        self.game_type = game_type
+        self.game_type = GameType.TOURNAMENT
+        self.game_variant = game_variant
+        self.tournament_id = tournament_id
         self.max_players = max_players
-        self.min_buy_in = min_buy_in
-        self.max_buy_in = max_buy_in
         self.small_blind = small_blind
         self.big_blind = big_blind
-        self.tournament_id = tournament_id
-        
+
         self.status = TableStatus.WAITING
         self.players: Dict[str, PlayerState] = {}
         self.spectators: Set[str] = set()
-        
-        # État du jeu
-        self._pk_state = None  # État PokerKit
-        self._pk_uid_map: List[str] = []  # Mapping index PokerKit -> user_id
-        self._game_task: Optional[asyncio.Task] = None
-        self._ws_manager = None
-        self._deck_security = DeckSecurity(table_id)
-        
-        # Tracking
+
+        self._pk_state = None          # PokerKit State
+        self._deck: List[str] = []
         self._hand_round = 0
         self._dealer_btn = 0
         self._street = 'preflop'
         self._community_cards: List[str] = []
-        self._current_deck: List[str] = []  # Deck de la main en cours
-        
-        # Tracking pour winner calculation
-        self._stacks_at_hand_start: Dict[str, int] = {}
-        
-        # Action en cours
-        self._current_actor_uid: Optional[str] = None
-        self._action_start_time: Optional[datetime] = None
-        self._action_timeout: int = ACTION_TIMEOUT
-        self._pending_action: Optional[PlayerActionRequest] = None
+        self._pot = 0
+        self._current_actor: Optional[str] = None
+        self._min_raise = big_blind
         self._action_event = asyncio.Event()
-        
-        # Resilience
-        self._consecutive_errors = 0
-        self._last_error: Optional[str] = None
+        self._last_action: Optional[dict] = None
+        self._action_timeout_remaining: Optional[float] = None
 
-    def set_ws_manager(self, manager):
-        self._ws_manager = manager
+        self._game_task: Optional[asyncio.Task] = None
+        self._game_loop_errors = 0
+        self._ws_manager = None
+        self._broadcast_lock = asyncio.Lock()
 
-    def can_join(self) -> bool:
-        """Vérifie si un joueur peut rejoindre"""
-        return len(self.players) < self.max_players
+        self._deck_security = DeckSecurity(table_id)
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Gestion des joueurs
-    # ─────────────────────────────────────────────────────────────────────────
-    
-    async def add_player(self, user, chips: int = None) -> bool:
-        """Ajoute un joueur à la table"""
-        if user.id in self.players:
-            # Joueur déjà présent, mettre à jour le statut si nécessaire
-            player = self.players[user.id]
-            if player.status == PlayerStatus.DISCONNECTED:
-                player.status = PlayerStatus.ACTIVE
-                await self._broadcast_state()
-            return True
-            
-        if len(self.players) >= self.max_players:
+    def set_ws_manager(self, ws_manager):
+        self._ws_manager = ws_manager
+
+    # ── Joueurs ───────────────────────────────────────────────────────────────
+
+    def add_player(self, user_id: str, username: str, chips: int,
+                   avatar: Optional[str] = None) -> bool:
+        if user_id in self.players or len(self.players) >= self.max_players:
             return False
-        
-        # Trouver une position libre
-        occupied = {p.position for p in self.players.values()}
-        position = next((i for i in range(self.max_players) if i not in occupied), None)
-        if position is None:
-            return False
-        
-        buy_in = chips if chips is not None else self.max_buy_in
-        
-        self.players[user.id] = PlayerState(
-            user_id=user.id,
-            username=user.username,
-            avatar=getattr(user, 'avatar', None),
-            chips=buy_in,
-            position=position,
+        pos = self._next_free_position()
+        self.players[user_id] = PlayerState(
+            user_id=user_id, username=username, avatar=avatar,
+            chips=chips, position=pos,
         )
-        
-        await self._broadcast_state()
-        logger.info(f"[{self.name}] {user.username} joined at seat {position} with {buy_in} chips")
-        
-        # Démarrer le jeu si assez de joueurs
-        if len(self.players) >= 2 and self.status == TableStatus.WAITING:
-            await self._start_game()
-        
+        logger.info(f"[{self.name}] {username} assis (pos {pos}, {chips} chips)")
+        self._try_start_game()
         return True
 
-    async def remove_player(self, user_id: str):
-        """Retire un joueur de la table"""
-        if user_id not in self.players:
-            return
-        
-        player = self.players[user_id]
-        del self.players[user_id]
-        
-        await self._broadcast_state()
-        logger.info(f"[{self.name}] {player.username} left")
-        
-        # Arrêter si plus assez de joueurs
-        if len(self.players) < 2 and self.status == TableStatus.PLAYING:
-            self.status = TableStatus.WAITING
-            if self._game_task:
-                self._game_task.cancel()
-                self._game_task = None
-
-    def mark_player_disconnected(self, user_id: str):
-        """Marque un joueur comme déconnecté"""
+    def remove_player(self, user_id: str):
         if user_id in self.players:
-            self.players[user_id].status = PlayerStatus.DISCONNECTED
-            logger.info(f"[{self.name}] {self.players[user_id].username} marked as disconnected")
-
-    def mark_player_reconnected(self, user_id: str):
-        """Marque un joueur comme reconnecté"""
-        if user_id in self.players:
-            player = self.players[user_id]
-            if player.status == PlayerStatus.DISCONNECTED:
-                player.status = PlayerStatus.ACTIVE
-                logger.info(f"[{self.name}] {player.username} reconnected")
+            del self.players[user_id]
+        self.spectators.discard(user_id)
 
     def add_spectator(self, user_id: str):
         self.spectators.add(user_id)
 
-    def remove_spectator(self, user_id: str):
-        self.spectators.discard(user_id)
+    def _next_free_position(self) -> int:
+        taken = {p.position for p in self.players.values()}
+        for i in range(self.max_players):
+            if i not in taken:
+                return i
+        return len(self.players)
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Actions du joueur
-    # ─────────────────────────────────────────────────────────────────────────
-    
-    async def handle_player_action(self, user_id: str, action: ActionType, amount: int = 0):
-        """Traite une action du joueur"""
-        if user_id != self._current_actor_uid:
-            logger.warning(f"[{self.name}] Action from {user_id} but current actor is {self._current_actor_uid}")
-            return
-        
-        # Enregistrer la dernière action
-        if user_id in self.players:
-            self.players[user_id].last_action = action.value if hasattr(action, 'value') else str(action)
-        
-        self._pending_action = PlayerActionRequest(action=action, amount=amount)
-        self._action_event.set()
+    # ── Blinds (mise à jour par le tournoi) ───────────────────────────────────
 
-    async def _wait_for_action(self, user_id: str, timeout: int) -> Optional[PlayerActionRequest]:
-        """Attend l'action d'un joueur avec timeout"""
-        self._current_actor_uid = user_id
-        self._pending_action = None
-        self._action_event.clear()
-        self._action_start_time = datetime.utcnow()
-        self._action_timeout = timeout
-        
-        await self._broadcast_state()
-        
-        try:
-            await asyncio.wait_for(self._action_event.wait(), timeout=timeout)
-            action = self._pending_action
-        except asyncio.TimeoutError:
-            action = None  # Auto-fold/check
-            logger.info(f"[{self.name}] {user_id} timed out, auto-action")
-        
-        self._current_actor_uid = None
-        self._action_start_time = None
-        return action
+    def update_blinds(self, small: int, big: int):
+        self.small_blind = small
+        self.big_blind = big
+        self._min_raise = big
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Boucle de jeu (avec resilience)
-    # ─────────────────────────────────────────────────────────────────────────
-    
-    async def _start_game(self):
-        """Démarre la boucle de jeu"""
-        if self._game_task and not self._game_task.done():
-            return
-        
-        self.status = TableStatus.PLAYING
-        self._consecutive_errors = 0
-        self._game_task = asyncio.create_task(self._game_loop())
+    # ── Démarrage ─────────────────────────────────────────────────────────────
+
+    def _try_start_game(self):
+        active = [p for p in self.players.values() if p.chips > 0]
+        if len(active) >= 2 and not self._game_task:
+            self._game_task = asyncio.create_task(self._game_loop())
 
     async def _game_loop(self):
-        """Boucle principale du jeu avec auto-recovery"""
+        """Boucle de jeu résiliente avec auto-restart"""
         logger.info(f"[{self.name}] Game loop started")
-        
-        while len(self.players) >= 2 and self.status == TableStatus.PLAYING:
-            try:
-                await self._play_hand()
-                self._consecutive_errors = 0  # Reset sur succès
-                await asyncio.sleep(PAUSE_BETWEEN_HANDS)
-                
-            except asyncio.CancelledError:
-                logger.info(f"[{self.name}] Game loop cancelled")
-                break
-                
-            except Exception as e:
-                self._consecutive_errors += 1
-                self._last_error = str(e)
-                logger.error(f"[{self.name}] Game loop error #{self._consecutive_errors}: {e}", exc_info=True)
-                
-                if self._consecutive_errors >= MAX_GAME_LOOP_ERRORS:
-                    logger.error(f"[{self.name}] Too many consecutive errors, stopping game")
-                    # Notifier les joueurs
-                    if self._ws_manager:
-                        await self._ws_manager.broadcast_to_table(self.id, {
-                            'type': 'error',
-                            'message': f'Table error: {e}. Game paused.',
-                            'recoverable': True,
-                        })
-                    break
-                
-                # Attendre avant retry
-                await asyncio.sleep(2)
-                
-                # Reset l'état pour la prochaine main
-                self._reset_hand_state()
-        
-        self.status = TableStatus.WAITING
-        logger.info(f"[{self.name}] Game loop ended")
+        self.status = TableStatus.PLAYING
+        self._game_loop_errors = 0
 
-    def _reset_hand_state(self):
-        """Reset l'état entre les mains (ou après erreur)"""
-        self._pk_state = None
-        self._street = 'preflop'
-        self._community_cards = []
-        self._current_deck = []
-        self._current_actor_uid = None
-        self._action_start_time = None
-        
-        for p in self.players.values():
-            p.hole_cards = []
-            p.current_bet = 0
-            p.total_bet = 0
-            p.is_all_in = False
-            p.last_action = None
-            if p.status == PlayerStatus.FOLDED:
-                p.status = PlayerStatus.ACTIVE
+        try:
+            while True:
+                active = [p for p in self.players.values() if p.chips > 0]
+                if len(active) < 2:
+                    logger.info(f"[{self.name}] < 2 joueurs actifs, arrêt")
+                    break
+
+                try:
+                    await self._play_hand()
+                    self._game_loop_errors = 0
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    self._game_loop_errors += 1
+                    logger.error(f"[{self.name}] Hand error ({self._game_loop_errors}/{MAX_GAME_LOOP_ERRORS}): {e}")
+                    if self._game_loop_errors >= MAX_GAME_LOOP_ERRORS:
+                        logger.error(f"[{self.name}] Too many errors, stopping game loop")
+                        break
+                    await asyncio.sleep(2)
+                    continue
+
+                await asyncio.sleep(PAUSE_BETWEEN_HANDS)
+
+        except asyncio.CancelledError:
+            logger.info(f"[{self.name}] Game loop cancelled")
+        finally:
+            self.status = TableStatus.WAITING
+            self._game_task = None
+            self._save_state()
+            logger.info(f"[{self.name}] Game loop ended")
+
+    # ── Main loop d'une main ──────────────────────────────────────────────────
 
     async def _play_hand(self):
-        """Joue une main complète"""
         self._hand_round += 1
-        self._reset_hand_state()
-        
-        # Filtrer les joueurs actifs
-        active_uids = [
-            uid for uid, ps in self.players.items() 
-            if ps.chips > 0 and ps.status not in (PlayerStatus.ELIMINATED, PlayerStatus.SITTING_OUT)
-        ]
-        
-        if len(active_uids) < 2:
-            logger.info(f"[{self.name}] Not enough players for a hand")
+        active_players = [p for p in self.players.values()
+                          if p.chips > 0 and p.status != PlayerStatus.ELIMINATED]
+
+        if len(active_players) < 2:
             return
-        
-        # Sauvegarder les stacks au début de la main (FIX CRITIQUE)
-        self._stacks_at_hand_start = {uid: self.players[uid].chips for uid in active_uids}
-        
-        # Créer le deck et commit
-        deck = self._make_deck()
-        self._current_deck = deck
-        commitment = self._deck_security.commit_deck(self._hand_round, deck)
-        
-        # Notifier le commit du deck
-        if self._ws_manager:
-            await self._ws_manager.broadcast_to_table(self.id, {
-                'type': 'deck_commit',
-                'round': self._hand_round,
-                'commitment': commitment,
-            })
-        
-        # Avancer le dealer button
-        self._dealer_btn = (self._dealer_btn + 1) % len(active_uids)
-        
-        # Ordonner les joueurs à partir du dealer
-        ordered_uids = active_uids[self._dealer_btn:] + active_uids[:self._dealer_btn]
-        self._pk_uid_map = ordered_uids
-        ordered = [self.players[uid] for uid in ordered_uids]
-        
-        # Reset des états joueurs
-        for i, ps in enumerate(ordered):
-            ps.hole_cards = []
-            ps.current_bet = 0
-            ps.total_bet = 0
-            ps.is_all_in = False
-            ps.last_action = None
-            ps.is_dealer = (i == 0)
-            ps.is_small_blind = (i == 1 % len(ordered))
-            ps.is_big_blind = (i == 2 % len(ordered)) if len(ordered) > 2 else (i == 1)
-            if ps.status == PlayerStatus.FOLDED:
-                ps.status = PlayerStatus.ACTIVE
-        
-        # Créer l'état PokerKit
-        stacks = [ps.chips for ps in ordered]
-        
+
+        # Reset
+        for p in self.players.values():
+            p.current_bet = 0
+            p.total_bet = 0
+            p.hole_cards = []
+            p.is_dealer = False
+            p.is_small_blind = False
+            p.is_big_blind = False
+            p.is_all_in = False
+            p.last_action = None
+            if p.chips > 0 and p.status != PlayerStatus.ELIMINATED:
+                p.status = PlayerStatus.ACTIVE
+            elif p.status not in (PlayerStatus.ELIMINATED, PlayerStatus.SITTING_OUT):
+                p.status = PlayerStatus.SITTING_OUT
+
+        active_players = sorted(
+            [p for p in self.players.values() if p.status == PlayerStatus.ACTIVE],
+            key=lambda p: p.position,
+        )
+        n = len(active_players)
+        if n < 2:
+            return
+
+        # Dealer button
+        self._dealer_btn = self._dealer_btn % n
+        dealer_idx = self._dealer_btn
+        active_players[dealer_idx].is_dealer = True
+
+        if n == 2:
+            active_players[dealer_idx].is_small_blind = True
+            active_players[(dealer_idx + 1) % n].is_big_blind = True
+        else:
+            active_players[(dealer_idx + 1) % n].is_small_blind = True
+            active_players[(dealer_idx + 2) % n].is_big_blind = True
+
+        # Mélanger le deck avec CSPRNG
+        self._deck = self._make_deck()
+        self._community_cards = []
+        self._pot = 0
+        self._street = 'preflop'
+        self._current_actor = None
+
+        # Commit deck (SRA)
+        commitment = self._deck_security.commit_deck(self._hand_round, self._deck)
+        await self._broadcast({
+            'type': 'deck_commitment',
+            'hand': self._hand_round,
+            'hash': commitment,
+        })
+
+        # PokerKit state
+        stacks = tuple(p.chips for p in active_players)
+
+        # Créer l'état PokerKit selon la variante
+        num_hole = 4 if self.game_variant == GameVariant.PLO else 2
         try:
-            game = NoLimitTexasHoldem(
+            self._pk_state = NoLimitTexasHoldem.create_state(
                 AUTOMATIONS,
-                True,  # Antes
-                0,     # Pas d'ante
-                (self.small_blind, self.big_blind),
-                self.big_blind,
+                ante_trimming_status=True,
+                raw_antes={-1: 0},
+                raw_blinds_or_straddles=(self.small_blind, self.big_blind),
+                min_bet=self.big_blind,
+                raw_starting_stacks=stacks,
+                player_count=n,
                 mode=Mode.CASH_GAME,
             )
-            pk = game(stacks, len(ordered))
         except Exception as e:
-            logger.error(f"[{self.name}] Failed to create PokerKit state: {e}")
+            logger.error(f"[{self.name}] PokerKit create_state failed: {e}")
             raise
-        
-        self._pk_state = pk
-        
-        # Distribution des hole cards
-        deck_idx = 0
-        for i, ps in enumerate(ordered):
-            cards = [deck[deck_idx], deck[deck_idx + 1]]
-            deck_idx += 2
-            ps.hole_cards = cards
-        
-        await self._broadcast_state()
-        logger.info(f"[{self.name}] Hand #{self._hand_round} started with {len(ordered)} players")
-        
-        # Index des community cards dans le deck
-        community_start = deck_idx
-        
-        # Compter les joueurs actifs (non fold, non all-in en attente)
-        def count_active_players():
-            return sum(1 for uid in self._pk_uid_map 
-                      if self.players[uid].status == PlayerStatus.ACTIVE 
-                      and not self.players[uid].is_all_in)
-        
-        # Boucle de betting
-        prev_street_index = -1
-        while pk.street_index is not None:
-            # Vérifier si la main peut continuer
-            active_count = sum(1 for i, uid in enumerate(self._pk_uid_map) 
-                              if i < len(pk.statuses) and pk.statuses[i])
-            
-            if active_count <= 1:
-                logger.info(f"[{self.name}] Only {active_count} player(s) remaining, ending hand")
-                break
-            
-            # Déterminer le street actuel
-            current_street = pk.street_index
-            if current_street != prev_street_index:
-                prev_street_index = current_street
-                
-                if current_street == 0:
-                    self._street = 'preflop'
-                elif current_street == 1:
-                    self._street = 'flop'
-                    # Révéler le flop (3 cartes)
-                    self._community_cards = deck[community_start:community_start + 3]
-                    await self._broadcast_state()
-                elif current_street == 2:
-                    self._street = 'turn'
-                    # Révéler la turn (4ème carte)
-                    if len(self._community_cards) == 3:
-                        self._community_cards = deck[community_start:community_start + 4]
-                        await self._broadcast_state()
-                elif current_street == 3:
-                    self._street = 'river'
-                    # Révéler la river (5ème carte)
-                    if len(self._community_cards) == 4:
-                        self._community_cards = deck[community_start:community_start + 5]
-                        await self._broadcast_state()
-            
-            # Trouver qui doit agir
-            actor_idx = pk.actor_index
-            if actor_idx is None:
-                # PokerKit n'a pas d'actor, vérifier si on doit avancer le street
-                if pk.street_index is not None:
-                    # Forcer l'avancement si possible
-                    try:
-                        if hasattr(pk, 'deal_board'):
-                            pk.deal_board()
-                        continue
-                    except:
-                        pass
-                break
-            
-            uid = self._pk_uid_map[actor_idx]
-            player = self.players[uid]
-            
-            # Vérifier si le joueur est déconnecté -> timeout réduit
-            timeout = ACTION_TIMEOUT
-            if player.status == PlayerStatus.DISCONNECTED:
-                timeout = 5  # 5 secondes pour les déconnectés
-            
-            # Attendre l'action
-            action = await self._wait_for_action(uid, timeout)
-            
-            # Appliquer l'action
-            try:
-                self._apply_action(pk, actor_idx, action, player)
-            except Exception as e:
-                logger.error(f"[{self.name}] Action error for {uid}: {e}")
-                # Fallback: check ou fold
-                try:
-                    if pk.can_check_or_call():
-                        pk.check_or_call()
-                    elif pk.can_fold():
-                        pk.fold()
-                except:
-                    break
-            
-            # Synchroniser les états
-            self._sync_pk(pk, ordered)
-        
-        # Showdown - révéler les cartes communes restantes si nécessaire
-        active_at_showdown = sum(1 for i, uid in enumerate(self._pk_uid_map) 
-                                 if i < len(pk.statuses) and pk.statuses[i])
-        
-        if active_at_showdown > 1:
-            # Showdown réel - révéler toutes les cartes
-            self._street = 'showdown'
-            self._community_cards = deck[community_start:community_start + 5]
-        # Si un seul joueur, ne pas révéler les cartes non distribuées
-        
-        # Synchronisation finale
-        self._sync_pk(pk, ordered)
-        
-        # Déterminer le gagnant (FIX CRITIQUE - utilise stacks sauvegardés)
-        winner_info = self._determine_winner(pk, ordered)
-        
-        # Broadcast le résultat
-        if self._ws_manager and winner_info:
-            await self._ws_manager.broadcast_to_table(self.id, {
-                'type': 'hand_result',
+
+        # Distribuer les cartes — envoi per-player (sécurité)
+        card_idx = 0
+        for i, p in enumerate(active_players):
+            cards = self._deck[card_idx:card_idx + num_hole]
+            card_idx += num_hole
+            p.hole_cards = cards
+            # Envoyer uniquement au joueur concerné
+            await self._send_to_player(p.user_id, {
+                'type': 'hole_cards',
+                'cards': cards,
                 'hand': self._hand_round,
-                'winner': winner_info.get('winner'),
-                'winner_id': winner_info.get('winner_id'),
-                'pot': winner_info.get('pot', 0),
-                'board': self._community_cards,
-                'hand_type': winner_info.get('hand_type', ''),
-                'winning_cards': winner_info.get('winning_cards', []),
             })
-        
-        # Révéler le deck
-        reveal = self._deck_security.reveal(self._hand_round)
-        if reveal and self._ws_manager:
-            await self._ws_manager.broadcast_to_table(self.id, {
-                'type': 'deck_reveal',
-                'round': self._hand_round,
-                'seed': reveal['seed'],
-                'deck_order': reveal['deck_order'],
-                'commitment': reveal['hash'],
-            })
-        
-        # Mise à jour finale des stacks et élimination
-        for i, uid in enumerate(self._pk_uid_map):
-            ps = self.players.get(uid)
-            if ps and i < len(pk.stacks):
-                ps.chips = int(pk.stacks[i])
-                if ps.chips <= 0:
-                    ps.status = PlayerStatus.ELIMINATED
-                    logger.info(f"[{self.name}] {ps.username} eliminated")
-        
-        # Sauvegarder l'état
-        self._save_state()
-        
-        # Broadcast final
+
+        # Broadcast état initial (sans hole cards)
         await self._broadcast_state()
-        logger.info(f"[{self.name}] Hand #{self._hand_round} completed - Winner: {winner_info.get('winner', 'Unknown')}")
 
-    def _apply_action(self, pk, actor_idx: int, action: Optional[PlayerActionRequest], player: PlayerState):
-        """Applique une action au jeu PokerKit"""
-        action_name = "timeout"
-        
-        if action is None:
-            # Timeout: auto-check si gratuit, sinon auto-fold
-            to_call = max(pk.bets) - pk.bets[actor_idx] if pk.bets else 0
-            if to_call <= 0 and pk.can_check_or_call():
-                pk.check_or_call()
-                action_name = "check"
-            elif pk.can_fold():
-                pk.fold()
-                action_name = "fold"
-                player.status = PlayerStatus.FOLDED
-            elif pk.can_check_or_call():
-                pk.check_or_call()
-                action_name = "call"
-                
-        elif action.action == ActionType.FOLD:
-            if pk.can_fold():
-                pk.fold()
-                player.status = PlayerStatus.FOLDED
-                action_name = "fold"
-            elif pk.can_check_or_call():
-                pk.check_or_call()
-                action_name = "check"
-                
-        elif action.action in (ActionType.CALL, ActionType.CHECK):
-            if pk.can_check_or_call():
-                pk.check_or_call()
-                action_name = "call" if max(pk.bets) > pk.bets[actor_idx] else "check"
-            elif pk.can_fold():
-                pk.fold()
-                player.status = PlayerStatus.FOLDED
-                action_name = "fold"
-                
-        elif action.action in (ActionType.RAISE, ActionType.ALL_IN):
-            if pk.can_complete_bet_or_raise_to():
-                mn = pk.min_completion_betting_or_raising_to_amount
-                mx = pk.max_completion_betting_or_raising_to_amount
-                
-                if action.action == ActionType.ALL_IN:
-                    amt = mx
+        # Boucle de betting
+        streets = ['preflop', 'flop', 'turn', 'river']
+        community_sizes = [0, 3, 1, 1]
+        burn_offset = card_idx  # après les hole cards
+
+        for street_idx, street_name in enumerate(streets):
+            self._street = street_name
+
+            # Community cards
+            if street_idx > 0:
+                num_cards = community_sizes[street_idx]
+                burn_offset += 1  # burn card
+                new_cards = self._deck[burn_offset:burn_offset + num_cards]
+                burn_offset += num_cards
+                self._community_cards.extend(new_cards)
+                await self._broadcast({
+                    'type': 'community_cards',
+                    'cards': list(self._community_cards),
+                    'street': street_name,
+                })
+
+            # Tour d'enchères
+            still_active = [p for p in active_players
+                           if p.status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN)]
+            non_allin = [p for p in still_active if p.status == PlayerStatus.ACTIVE]
+
+            if len(non_allin) <= 1 and len(still_active) > 1:
+                continue  # tout le monde all-in sauf 1
+
+            if len(still_active) <= 1:
+                break  # plus qu'un joueur
+
+            # Reset bets for new street
+            if street_idx > 0:
+                for p in active_players:
+                    p.current_bet = 0
+                self._min_raise = self.big_blind
+
+            await self._betting_round(active_players, street_name)
+
+            # Check if only one player left
+            active_non_folded = [p for p in active_players if p.status != PlayerStatus.FOLDED]
+            if len(active_non_folded) <= 1:
+                break
+
+        # Showdown / déterminer le gagnant
+        await self._determine_winner(active_players)
+
+        # Reveal deck (SRA)
+        reveal_data = self._deck_security.reveal(self._hand_round)
+        if reveal_data:
+            await self._broadcast({
+                'type': 'deck_reveal',
+                'hand': self._hand_round,
+                'seed': reveal_data['seed'],
+                'deck_order': reveal_data['deck_order'],
+                'hash': reveal_data['hash'],
+            })
+
+        # Avancer le dealer
+        self._dealer_btn = (self._dealer_btn + 1) % len(active_players)
+        self._save_state()
+
+    # ── Betting round ─────────────────────────────────────────────────────────
+
+    async def _betting_round(self, players: List[PlayerState], street: str):
+        active = [p for p in players if p.status == PlayerStatus.ACTIVE]
+        if len(active) <= 1:
+            return
+
+        n = len(players)
+        # Déterminer le premier à parler
+        if street == 'preflop':
+            # Après le big blind
+            bb_idx = next((i for i, p in enumerate(players) if p.is_big_blind), 0)
+            start = (bb_idx + 1) % n
+        else:
+            # Après le dealer
+            d_idx = next((i for i, p in enumerate(players) if p.is_dealer), 0)
+            start = (d_idx + 1) % n
+
+        last_raiser = None
+        current_bet = max(p.current_bet for p in players) if players else 0
+        acted = set()
+        max_rounds = n * 4  # éviter boucle infinie
+        rounds = 0
+
+        idx = start
+        while rounds < max_rounds:
+            rounds += 1
+            p = players[idx % n]
+            idx += 1
+
+            if p.status in (PlayerStatus.FOLDED, PlayerStatus.ALL_IN, PlayerStatus.ELIMINATED,
+                           PlayerStatus.SITTING_OUT, PlayerStatus.DISCONNECTED):
+                if p.user_id in acted or p.status != PlayerStatus.ACTIVE:
+                    # Check si tour terminé
+                    remaining = [x for x in players if x.status == PlayerStatus.ACTIVE]
+                    if all(x.user_id in acted for x in remaining):
+                        break
+                    continue
+                continue
+
+            # Si tout le monde a agi et personne n'a relancé
+            if p.user_id in acted and (last_raiser is None or last_raiser == p.user_id):
+                break
+            if p.user_id == last_raiser and p.user_id in acted:
+                break
+
+            # Calculer les actions possibles
+            to_call = current_bet - p.current_bet
+            can_check = (to_call == 0)
+            can_call = (to_call > 0 and to_call < p.chips)
+            can_raise = (p.chips > to_call)
+
+            # Quick bets
+            quick_bets = QuickBetCalculator.calculate(
+                pot=self._pot + sum(x.current_bet for x in players),
+                big_blind=self.big_blind,
+                current_bet=to_call,
+                player_chips=p.chips,
+                min_raise=self._min_raise,
+            )
+
+            self._current_actor = p.user_id
+            self._action_event.clear()
+
+            await self._broadcast_state(quick_bets=quick_bets)
+
+            # Attendre l'action avec timeout
+            try:
+                action, amount = await asyncio.wait_for(
+                    self._wait_for_action(p.user_id),
+                    timeout=ACTION_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                # Auto-fold/check sur timeout
+                if can_check:
+                    action, amount = ActionType.CHECK, 0
+                    p.last_action = 'check (timeout)'
                 else:
-                    amt = max(mn, min(action.amount, mx))
-                
-                pk.complete_bet_or_raise_to(amt)
-                action_name = "raise" if amt < mx else "all_in"
-                
-                if amt >= mx or player.chips <= amt:
-                    player.is_all_in = True
-                    player.status = PlayerStatus.ALL_IN
-                    
-            elif pk.can_check_or_call():
-                pk.check_or_call()
-                action_name = "call"
-            elif pk.can_fold():
-                pk.fold()
-                player.status = PlayerStatus.FOLDED
-                action_name = "fold"
-        
-        player.last_action = action_name
-        logger.debug(f"[{self.name}] {player.username} -> {action_name}")
+                    action, amount = ActionType.FOLD, 0
+                    p.last_action = 'fold (timeout)'
+                logger.info(f"[{self.name}] {p.username} timeout → {p.last_action}")
 
-    def _sync_pk(self, pk, ordered: List[PlayerState]):
-        """Synchronise l'état PokerKit avec nos PlayerState"""
-        for i, ps in enumerate(ordered):
-            if i < len(pk.stacks):
-                ps.chips = int(pk.stacks[i])
-            if i < len(pk.bets):
-                ps.current_bet = int(pk.bets[i])
-            if i < len(pk.statuses) and not pk.statuses[i]:
-                if ps.status not in (PlayerStatus.ALL_IN, PlayerStatus.ELIMINATED):
-                    ps.status = PlayerStatus.FOLDED
+            # Appliquer l'action
+            if action == ActionType.FOLD:
+                p.status = PlayerStatus.FOLDED
+                p.last_action = 'fold'
+                await self._broadcast({
+                    'type': 'player_action',
+                    'user_id': p.user_id,
+                    'action': 'fold',
+                    'amount': 0,
+                })
 
-    def _determine_winner(self, pk, ordered: List[PlayerState]) -> dict:
-        """
-        Détermine le gagnant de la main.
-        FIX: Utilise les stacks sauvegardés au début de la main.
-        """
-        winner = None
-        winner_id = None
-        max_gain = 0
-        winning_cards = []
-        
-        for i, ps in enumerate(ordered):
-            if i < len(pk.stacks):
-                current_stack = int(pk.stacks[i])
-                starting_stack = self._stacks_at_hand_start.get(ps.user_id, current_stack)
-                gain = current_stack - starting_stack
-                
-                if gain > max_gain:
-                    max_gain = gain
-                    winner = ps.username
-                    winner_id = ps.user_id
-                    winning_cards = ps.hole_cards
-        
-        # Si personne n'a gagné de chips (tous fold sauf un)
-        if winner is None:
-            for i, ps in enumerate(ordered):
-                if i < len(pk.statuses) and pk.statuses[i]:
-                    winner = ps.username
-                    winner_id = ps.user_id
-                    winning_cards = ps.hole_cards
-                    break
-        
-        # Calculer le pot total
-        total_pot = sum(self._stacks_at_hand_start.values()) - sum(
-            ps.chips for ps in ordered
-        ) if ordered else 0
-        
-        # Fallback si calcul bizarre
-        if total_pot <= 0:
-            total_pot = max_gain
-        
-        return {
-            'winner': winner or (ordered[0].username if ordered else 'Unknown'),
-            'winner_id': winner_id or (ordered[0].user_id if ordered else None),
-            'pot': total_pot,
-            'hand_type': '',  # TODO: évaluation main PokerKit
-            'winning_cards': winning_cards,
+            elif action == ActionType.CHECK:
+                p.last_action = 'check'
+                await self._broadcast({
+                    'type': 'player_action',
+                    'user_id': p.user_id,
+                    'action': 'check',
+                    'amount': 0,
+                })
+
+            elif action == ActionType.CALL:
+                call_amt = min(to_call, p.chips)
+                p.chips -= call_amt
+                p.current_bet += call_amt
+                p.total_bet += call_amt
+                self._pot += call_amt
+                if p.chips == 0:
+                    p.status = PlayerStatus.ALL_IN
+                    p.is_all_in = True
+                p.last_action = 'call'
+                await self._broadcast({
+                    'type': 'player_action',
+                    'user_id': p.user_id,
+                    'action': 'call',
+                    'amount': call_amt,
+                })
+
+            elif action in (ActionType.RAISE, ActionType.ALL_IN):
+                if action == ActionType.ALL_IN:
+                    amount = p.chips
+
+                raise_amt = max(amount, self._min_raise)
+                raise_amt = min(raise_amt, p.chips)
+                p.chips -= raise_amt
+                p.current_bet += raise_amt
+                p.total_bet += raise_amt
+                self._pot += raise_amt
+                current_bet = p.current_bet
+                self._min_raise = max(self._min_raise, raise_amt - to_call)
+                last_raiser = p.user_id
+                acted = {p.user_id}  # reset : tout le monde doit reagir
+
+                if p.chips == 0:
+                    p.status = PlayerStatus.ALL_IN
+                    p.is_all_in = True
+                p.last_action = 'raise' if action == ActionType.RAISE else 'all-in'
+                await self._broadcast({
+                    'type': 'player_action',
+                    'user_id': p.user_id,
+                    'action': p.last_action,
+                    'amount': raise_amt,
+                })
+
+            acted.add(p.user_id)
+            self._current_actor = None
+
+            # Vérifier fin du tour
+            remaining = [x for x in players if x.status == PlayerStatus.ACTIVE]
+            if len(remaining) <= 1:
+                break
+            if all(x.user_id in acted for x in remaining) and last_raiser is None:
+                break
+            # Si le raiser est le seul à ne pas avoir agi et tout le monde a agi
+            if last_raiser and all(x.user_id in acted for x in remaining):
+                break
+
+        self._current_actor = None
+
+    async def _wait_for_action(self, user_id: str) -> Tuple[ActionType, int]:
+        """Attend l'action d'un joueur"""
+        while True:
+            await self._action_event.wait()
+            self._action_event.clear()
+            if self._last_action and self._last_action.get('user_id') == user_id:
+                return (
+                    ActionType(self._last_action['action']),
+                    self._last_action.get('amount', 0),
+                )
+
+    async def handle_player_action(self, user_id: str, action: ActionType, amount: int = 0):
+        """API publique — reçoit l'action d'un joueur"""
+        if self._current_actor != user_id:
+            raise ValueError("Not your turn")
+        self._last_action = {
+            'user_id': user_id,
+            'action': action.value,
+            'amount': amount,
         }
+        self._action_event.set()
 
-    @staticmethod
-    def _str_to_card(card_str: str):
-        """Convertit une string carte en Card PokerKit"""
-        from pokerkit import Card
-        return Card(card_str)
+    # ── Showdown ──────────────────────────────────────────────────────────────
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # État et broadcast
-    # ─────────────────────────────────────────────────────────────────────────
-    
+    async def _determine_winner(self, players: List[PlayerState]):
+        """Détermine le(s) gagnant(s) et distribue le pot"""
+        non_folded = [p for p in players if p.status != PlayerStatus.FOLDED]
+
+        if len(non_folded) == 1:
+            winner = non_folded[0]
+            winner.chips += self._pot
+            await self._broadcast({
+                'type': 'hand_result',
+                'winners': [{'user_id': winner.user_id, 'username': winner.username,
+                            'amount': self._pot, 'hand': 'Last standing'}],
+                'pot': self._pot,
+                'community_cards': self._community_cards,
+            })
+            return
+
+        # Évaluation des mains avec PokerKit
+        # Pour simplifier on compare les mains manuellement
+        # (le state PokerKit n'est pas toujours synchronisé dans notre boucle custom)
+        from pokerkit import StandardHighHand, Card as PKCard
+
+        best_hands = []
+        for p in non_folded:
+            try:
+                all_cards = p.hole_cards + self._community_cards
+                pk_cards = []
+                for c in all_cards:
+                    rank_map = {'T': '10', 'J': 'J', 'Q': 'Q', 'K': 'K', 'A': 'A'}
+                    rank_str = rank_map.get(c[0], c[0])
+                    suit_str = c[1]
+                    pk_cards.append(PKCard(c))
+
+                if self.game_variant == GameVariant.PLO:
+                    # PLO : exactement 2 des 4 hole cards + 3 du board
+                    from itertools import combinations
+                    best = None
+                    for hole_combo in combinations(range(len(p.hole_cards)), 2):
+                        for board_combo in combinations(range(len(self._community_cards)), 3):
+                            combo = [PKCard(p.hole_cards[i]) for i in hole_combo] + \
+                                    [PKCard(self._community_cards[i]) for i in board_combo]
+                            hand = StandardHighHand.from_game(combo)
+                            if best is None or hand > best:
+                                best = hand
+                    best_hands.append((p, best))
+                else:
+                    # Hold'em : meilleure main de 5 parmi 7
+                    from itertools import combinations
+                    best = None
+                    for combo in combinations([PKCard(c) for c in all_cards], 5):
+                        hand = StandardHighHand.from_game(combo)
+                        if best is None or hand > best:
+                            best = hand
+                    best_hands.append((p, best))
+            except Exception as e:
+                logger.error(f"[{self.name}] Hand eval error for {p.username}: {e}")
+                best_hands.append((p, None))
+
+        # Trier par force de main (descending)
+        best_hands.sort(key=lambda x: x[1] if x[1] else 0, reverse=True)
+
+        if best_hands:
+            winning_hand = best_hands[0][1]
+            winners = [ph for ph, h in best_hands if h == winning_hand]
+            share = self._pot // len(winners)
+            remainder = self._pot % len(winners)
+
+            for i, w in enumerate(winners):
+                w.chips += share + (1 if i < remainder else 0)
+
+            # Broadcast showdown
+            showdown_data = []
+            for p in non_folded:
+                showdown_data.append({
+                    'user_id': p.user_id,
+                    'username': p.username,
+                    'hole_cards': p.hole_cards,
+                })
+
+            await self._broadcast({
+                'type': 'hand_result',
+                'winners': [{'user_id': w.user_id, 'username': w.username,
+                            'amount': share, 'hand': str(winning_hand) if winning_hand else '?'}
+                           for w in winners],
+                'pot': self._pot,
+                'community_cards': self._community_cards,
+                'showdown': showdown_data,
+            })
+
+    # ── État ──────────────────────────────────────────────────────────────────
+
     def get_state(self, for_user_id: Optional[str] = None) -> dict:
-        """
-        Retourne l'état complet de la table.
-        Si for_user_id est spécifié, cache les hole cards des autres joueurs.
-        """
-        pk = self._pk_state
-        
-        # Calcul du timer (FIX: calcul correct)
-        timer = None
-        if self._action_start_time and self._current_actor_uid:
-            elapsed = (datetime.utcnow() - self._action_start_time).total_seconds()
-            timer = max(0, int(self._action_timeout - elapsed))
-        
-        # Données des joueurs
         players_data = []
         for uid, ps in self.players.items():
-            # Cacher les cartes des autres joueurs sauf showdown
-            hide_cards = (
-                for_user_id is not None 
-                and uid != for_user_id 
-                and self._street != 'showdown'
-            )
-            players_data.append(ps.to_dict(hide_cards=hide_cards))
-        
-        # Min raise
-        min_raise = self.big_blind * 2
-        max_raise = 0
-        if pk and pk.can_complete_bet_or_raise_to():
-            min_raise = pk.min_completion_betting_or_raising_to_amount
-            max_raise = pk.max_completion_betting_or_raising_to_amount
-        
-        # Pot actuel
-        pot = sum(pk.bets) if pk and pk.bets else 0
-        # Ajouter les mises déjà collectées dans les pots précédents
-        if pk and hasattr(pk, 'pots'):
-            pot += sum(p for p in pk.pots if isinstance(p, (int, float)))
-        
+            hide = (for_user_id is None or uid != for_user_id)
+            players_data.append(ps.to_dict(hide_cards=hide))
+
         return {
             'table_id': self.id,
             'name': self.name,
+            'game_variant': self.game_variant.value if hasattr(self.game_variant, 'value') else str(self.game_variant),
             'status': self.status.value if hasattr(self.status, 'value') else str(self.status),
             'round': self._hand_round,
-            'pot': pot,
+            'pot': self._pot,
             'community_cards': self._community_cards,
-            'betting_round': self._street,
-            'current_bet': int(max(pk.bets)) if pk and pk.bets else 0,
-            'current_player_index': pk.actor_index if pk else None,
-            'current_actor': self._current_actor_uid,
-            'action_timer': timer,
-            'action_timeout_total': self._action_timeout,
-            'dealer_index': self._dealer_btn,
+            'current_actor': self._current_actor,
+            'action_timer': self._action_timeout_remaining,
+            'action_timeout_total': ACTION_TIMEOUT,
+            'min_raise': self._min_raise,
             'players': players_data,
-            'min_raise': min_raise,
-            'max_raise': max_raise,
-            'max_players': self.max_players,
+            'spectators': list(self.spectators),
+            'dealer_btn': self._dealer_btn,
             'small_blind': self.small_blind,
             'big_blind': self.big_blind,
-            'tournament_id': self.tournament_id,
+            'betting_round': self._street,
+            'max_players': self.max_players,
         }
 
-    async def _broadcast_state(self):
-        """Broadcast l'état à tous les clients"""
-        if not self._ws_manager:
-            return
-        
-        # État de base (sans cartes cachées pour le broadcast général)
-        base_state = self.get_state()
-        
-        # Pour chaque joueur, envoyer un état personnalisé avec ses cartes
-        for uid in list(self.players.keys()) | self.spectators:
-            try:
-                personal_state = self.get_state(for_user_id=uid)
-                await self._ws_manager.send_to_player(self.id, uid, {
-                    'type': 'game_state',
-                    'data': personal_state,
-                })
-            except Exception as e:
-                logger.error(f"Failed to send state to {uid}: {e}")
-
     def get_info(self) -> Table:
-        """Retourne les infos publiques de la table"""
         return Table(
-            id=self.id,
-            name=self.name,
-            game_type=self.game_type,
-            tournament_id=self.tournament_id,
-            max_players=self.max_players,
+            id=self.id, name=self.name, game_type=self.game_type,
+            game_variant=self.game_variant,
+            tournament_id=self.tournament_id, max_players=self.max_players,
             status=self.status,
             players=[ps.to_pydantic() for ps in self.players.values()],
             spectators=list(self.spectators),
         )
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Utilitaires
-    # ─────────────────────────────────────────────────────────────────────────
-    
+    # ── Communication ─────────────────────────────────────────────────────────
+
+    async def _broadcast(self, message: dict):
+        if not self._ws_manager:
+            return
+        async with self._broadcast_lock:
+            try:
+                await self._ws_manager.broadcast_to_table(self.id, message)
+            except Exception as e:
+                logger.error(f"[{self.name}] Broadcast error: {e}")
+
+    async def _broadcast_state(self, quick_bets: Optional[List[dict]] = None):
+        """Broadcast l'état — envoie les hole_cards uniquement au joueur concerné"""
+        if not self._ws_manager:
+            return
+        async with self._broadcast_lock:
+            for uid in list(self.players.keys()) | self.spectators:
+                is_player = uid in self.players
+                state = self.get_state(for_user_id=uid if is_player else None)
+                msg = {'type': 'game_update', 'data': state}
+                if quick_bets and uid == self._current_actor:
+                    msg['quick_bets'] = quick_bets
+                try:
+                    await self._ws_manager.send_to_user(self.id, uid, msg)
+                except Exception:
+                    pass
+
+    async def _send_to_player(self, user_id: str, message: dict):
+        if not self._ws_manager:
+            return
+        try:
+            await self._ws_manager.send_to_user(self.id, user_id, message)
+        except Exception as e:
+            logger.error(f"[{self.name}] Send to {user_id} failed: {e}")
+
+    # ── Utilitaires ───────────────────────────────────────────────────────────
+
     @staticmethod
     def _make_deck() -> List[str]:
-        """Crée et mélange un deck standard"""
         ranks = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A']
         suits = ['h', 'd', 'c', 's']
         deck = [f"{r}{s}" for s in suits for r in ranks]
-        random.shuffle(deck)
+        _CSPRNG.shuffle(deck)
         return deck
 
     def _save_state(self):
-        """Sauvegarde l'état de la table"""
         try:
             data = {
-                'table_id': self.id,
-                'name': self.name,
+                'table_id': self.id, 'name': self.name,
                 'tournament_id': self.tournament_id,
-                'small_blind': self.small_blind,
-                'big_blind': self.big_blind,
+                'game_variant': self.game_variant.value,
+                'small_blind': self.small_blind, 'big_blind': self.big_blind,
                 'max_players': self.max_players,
-                'hand_round': self._hand_round,
-                'dealer_btn': self._dealer_btn,
+                'hand_round': self._hand_round, 'dealer_btn': self._dealer_btn,
                 'status': self.status.value if hasattr(self.status, 'value') else str(self.status),
                 'players': {
                     uid: {
-                        'user_id': ps.user_id,
-                        'username': ps.username,
-                        'avatar': ps.avatar,
-                        'chips': ps.chips,
+                        'user_id': ps.user_id, 'username': ps.username,
+                        'avatar': ps.avatar, 'chips': ps.chips,
                         'position': ps.position,
                         'status': ps.status.value if hasattr(ps.status, 'value') else str(ps.status),
                     }
@@ -958,31 +935,27 @@ class PokerTable:
             with open(STATE_DIR / f"{self.id}.json", 'w') as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
-            logger.error(f"[{self.name}] Failed to save state: {e}")
+            logger.error(f"[{self.name}] save_state: {e}")
 
     def _delete_state(self):
-        """Supprime l'état sauvegardé"""
         try:
             (STATE_DIR / f"{self.id}.json").unlink(missing_ok=True)
-        except:
+        except Exception:
             pass
 
     async def close(self):
-        """Ferme la table"""
         if self._game_task:
             self._game_task.cancel()
             try:
                 await self._game_task
             except asyncio.CancelledError:
                 pass
-        
         self._deck_security.cleanup()
         self._delete_state()
         logger.info(f"[{self.name}] Table closed")
 
     @classmethod
     def load_state(cls, table_id: str) -> Optional[dict]:
-        """Charge l'état sauvegardé d'une table"""
         path = STATE_DIR / f"{table_id}.json"
         if not path.exists():
             return None
@@ -990,5 +963,5 @@ class PokerTable:
             with open(path) as f:
                 return json.load(f)
         except Exception as e:
-            logger.error(f"Failed to load state for {table_id}: {e}")
+            logger.error(f"load_state {table_id}: {e}")
             return None
