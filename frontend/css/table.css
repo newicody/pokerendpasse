@@ -256,8 +256,24 @@
 }
 .action-timer-display {
     font-family: 'Fira Mono', monospace; color: var(--warning);
+    display: flex; align-items: center; gap: 6px;
 }
 .action-timer-display.hidden { display: none; }
+.timer-bar-bg {
+    width: 80px; height: 6px; background: var(--bg-tertiary);
+    border-radius: 3px; overflow: hidden;
+}
+.timer-bar-fill {
+    height: 100%; border-radius: 3px; transition: width 1s linear;
+}
+.timer-text { font-size: 12px; white-space: nowrap; }
+
+/* Pot side display */
+.pot-side {
+    font-size: 11px; color: var(--text-secondary);
+    display: block; margin-top: 2px;
+}
+.pot-main { display: block; }
 
 /* ── Right Panel ───────────────────────────────────────────────────────── */
 .game-info-panel, .hand-history-panel, .table-chat, .quick-options {

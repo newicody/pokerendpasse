@@ -1,17 +1,19 @@
 /**
- * timer.js — Timer d'action avec callback
+ * timer.js — Timer d'action avec callback (secs, percentage)
  */
 const TimerModule = (() => {
     let _interval = null;
     let _remaining = 0;
+    let _total = 0;
 
     function start(seconds, total, callback) {
         stop();
         _remaining = seconds;
-        callback(_remaining, _remaining / total);
+        _total = total || seconds;
+        callback(_remaining, _remaining / _total);
         _interval = setInterval(() => {
             _remaining = Math.max(0, _remaining - 1);
-            callback(_remaining, _remaining / total);
+            callback(_remaining, _total > 0 ? _remaining / _total : 0);
             if (_remaining <= 0) stop();
         }, 1000);
     }
@@ -20,7 +22,9 @@ const TimerModule = (() => {
         if (_interval) { clearInterval(_interval); _interval = null; }
     }
 
-    return { start, stop };
+    function getRemaining() { return _remaining; }
+
+    return { start, stop, getRemaining };
 })();
 
 window.TimerModule = TimerModule;

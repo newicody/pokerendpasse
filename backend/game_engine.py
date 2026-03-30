@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Any, Tuple
 
-from pokerkit import NoLimitTexasHoldem, Automation, Mode
+from pokerkit import NoLimitTexasHoldem, PotLimitOmahaHoldem, Automation, Mode
 
 from .models import (
     Table, TablePlayer, GameState, GameStatus, TableStatus,
@@ -40,6 +40,9 @@ STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 COMMITMENT_DIR = Path("data/deck_commitments")
 COMMITMENT_DIR.mkdir(parents=True, exist_ok=True)
+
+HISTORY_DIR = Path("data/hand_history")
+HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 
 # CSPRNG pour le mélange du deck
 _CSPRNG = secrets.SystemRandom()
@@ -287,6 +290,7 @@ class PokerTable:
         self.max_players = max_players
         self.small_blind = small_blind
         self.big_blind = big_blind
+        self.ante = 0
 
         self.status = TableStatus.WAITING
         self.players: Dict[str, PlayerState] = {}
@@ -347,9 +351,10 @@ class PokerTable:
 
     # ── Blinds (mise à jour par le tournoi) ───────────────────────────────────
 
-    def update_blinds(self, small: int, big: int):
+    def update_blinds(self, small: int, big: int, ante: int = 0):
         self.small_blind = small
         self.big_blind = big
+        self.ante = ante
         self._min_raise = big
 
     # ── Démarrage ─────────────────────────────────────────────────────────────
@@ -367,10 +372,28 @@ class PokerTable:
 
         try:
             while True:
-                active = [p for p in self.players.values() if p.chips > 0]
+                active = [p for p in self.players.values()
+                          if p.chips > 0 and p.status != PlayerStatus.ELIMINATED]
                 if len(active) < 2:
                     logger.info(f"[{self.name}] < 2 joueurs actifs, arrêt")
                     break
+
+                # Vérifier si le tournoi est en pause
+                if self.tournament_id and self._ws_manager and self._ws_manager._tournament_manager:
+                    tm = self._ws_manager._tournament_manager
+                    tournament = tm.get_tournament(self.tournament_id)
+                    if tournament:
+                        while tournament.status == 'paused':
+                            await self._broadcast({
+                                'type': 'tournament_paused',
+                                'message': 'Tournoi en pause…',
+                            })
+                            await asyncio.sleep(5)
+                            tournament = tm.get_tournament(self.tournament_id)
+                            if not tournament:
+                                break
+                        if tournament and tournament.status == 'finished':
+                            break
 
                 try:
                     await self._play_hand()
@@ -441,10 +464,58 @@ class PokerTable:
             active_players[(dealer_idx + 1) % n].is_small_blind = True
             active_players[(dealer_idx + 2) % n].is_big_blind = True
 
+        # ── Poster les antes ──
+        self._pot = 0
+        if self.ante > 0:
+            for p in active_players:
+                ante_amt = min(self.ante, p.chips)
+                if ante_amt > 0:
+                    p.chips -= ante_amt
+                    p.total_bet += ante_amt
+                    self._pot += ante_amt
+                    if p.chips == 0:
+                        p.status = PlayerStatus.ALL_IN
+                        p.is_all_in = True
+                    await self._broadcast({
+                        'type': 'player_action',
+                        'user_id': p.user_id, 'username': p.username,
+                        'action': 'ante', 'amount': ante_amt,
+                    })
+
+        # ── Poster les blinds ──
+        for p in active_players:
+            if p.is_small_blind:
+                sb_amt = min(self.small_blind, p.chips)
+                p.chips -= sb_amt
+                p.current_bet = sb_amt
+                p.total_bet += sb_amt
+                self._pot += sb_amt
+                if p.chips == 0:
+                    p.status = PlayerStatus.ALL_IN
+                    p.is_all_in = True
+                await self._broadcast({
+                    'type': 'player_action',
+                    'user_id': p.user_id, 'username': p.username,
+                    'action': 'small_blind', 'amount': sb_amt,
+                })
+            elif p.is_big_blind:
+                bb_amt = min(self.big_blind, p.chips)
+                p.chips -= bb_amt
+                p.current_bet = bb_amt
+                p.total_bet += bb_amt
+                self._pot += bb_amt
+                if p.chips == 0:
+                    p.status = PlayerStatus.ALL_IN
+                    p.is_all_in = True
+                await self._broadcast({
+                    'type': 'player_action',
+                    'user_id': p.user_id, 'username': p.username,
+                    'action': 'big_blind', 'amount': bb_amt,
+                })
+
         # Mélanger le deck avec CSPRNG
         self._deck = self._make_deck()
         self._community_cards = []
-        self._pot = 0
         self._street = 'preflop'
         self._current_actor = None
 
@@ -462,7 +533,8 @@ class PokerTable:
         # Créer l'état PokerKit selon la variante
         num_hole = 4 if self.game_variant == GameVariant.PLO else 2
         try:
-            self._pk_state = NoLimitTexasHoldem.create_state(
+            GameClass = PotLimitOmahaHoldem if self.game_variant == GameVariant.PLO else NoLimitTexasHoldem
+            self._pk_state = GameClass.create_state(
                 AUTOMATIONS,
                 ante_trimming_status=True,
                 raw_antes={-1: 0},
@@ -553,59 +625,108 @@ class PokerTable:
 
         # Avancer le dealer
         self._dealer_btn = (self._dealer_btn + 1) % len(active_players)
+
+        # ── Détecter les joueurs éliminés (0 chips) ──
+        eliminated = []
+        for p in self.players.values():
+            if p.chips <= 0 and p.status not in (PlayerStatus.ELIMINATED,):
+                p.status = PlayerStatus.ELIMINATED
+                eliminated.append(p)
+                logger.info(f"[{self.name}] {p.username} éliminé (0 chips)")
+
+        # Notifier le tournoi des éliminations
+        if eliminated and self.tournament_id and self._ws_manager:
+            try:
+                tm = self._ws_manager._tournament_manager
+                if tm:
+                    tournament = tm.get_tournament(self.tournament_id)
+                    if tournament:
+                        remaining_count = len([p for p in self.players.values()
+                                              if p.status != PlayerStatus.ELIMINATED and p.chips > 0])
+                        # Compter les joueurs encore en jeu dans tout le tournoi
+                        total_remaining = len(tournament.get_registered_players())
+
+                        for p in eliminated:
+                            rank = total_remaining + 1
+                            tournament.eliminate_player(p.user_id, rank)
+                            total_remaining -= 1
+                            await tm._broadcast_player_eliminated(tournament, p.user_id, rank)
+
+                        tm.save_tournament(tournament)
+
+                        # Vérifier si le tournoi est terminé (1 seul joueur restant)
+                        alive = tournament.get_registered_players()
+                        if len(alive) <= 1:
+                            tournament.status = 'finished'
+                            if alive:
+                                tournament.winners = [{'user_id': alive[0]['user_id'],
+                                                       'username': alive[0]['username'],
+                                                       'rank': 1}]
+                            tm.save_tournament(tournament)
+                            logger.info(f"[Tournament {self.tournament_id}] FINISHED!")
+                            # Broadcast fin de tournoi à toutes les tables
+                            ws = tm._get_ws_manager()
+                            if ws:
+                                for table_id in tournament.tables:
+                                    await ws.broadcast_to_table(table_id, {
+                                        'type': 'tournament_finished',
+                                        'tournament_id': tournament.id,
+                                        'name': tournament.name,
+                                        'winner': tournament.winners[0] if tournament.winners else None,
+                                        'results_url': f'/tournament/{tournament.id}/results',
+                                    })
+            except Exception as e:
+                logger.error(f"[{self.name}] Elimination notify error: {e}")
+
         self._save_state()
 
-    # ── Betting round ─────────────────────────────────────────────────────────
+    # ── Betting round (refactorisé) ─────────────────────────────────────────
 
     async def _betting_round(self, players: List[PlayerState], street: str):
-        active = [p for p in players if p.status == PlayerStatus.ACTIVE]
-        if len(active) <= 1:
+        """
+        Tour d'enchères standard.
+        Algorithme "orbit with last aggressor" :
+        - On tourne autour de la table
+        - Chaque joueur ACTIVE agit une fois
+        - Si quelqu'un relance, le "close position" avance au joueur avant lui
+        - Le tour se termine quand on revient au close position
+        """
+        # Filtrer les joueurs qui peuvent agir
+        acting = [p for p in players if p.status == PlayerStatus.ACTIVE]
+        if len(acting) <= 1:
             return
 
         n = len(players)
-        # Déterminer le premier à parler
+
+        # Premier à parler
         if street == 'preflop':
-            # Après le big blind
             bb_idx = next((i for i, p in enumerate(players) if p.is_big_blind), 0)
-            start = (bb_idx + 1) % n
+            first = (bb_idx + 1) % n
         else:
-            # Après le dealer
             d_idx = next((i for i, p in enumerate(players) if p.is_dealer), 0)
-            start = (d_idx + 1) % n
+            first = (d_idx + 1) % n
 
-        last_raiser = None
+        # "close_seat" = position jusqu'à laquelle on joue (le joueur AVANT le premier)
+        # Quand quelqu'un raise, close_seat avance au joueur avant lui
+        close_seat = (first - 1 + n) % n
         current_bet = max(p.current_bet for p in players) if players else 0
-        acted = set()
-        max_rounds = n * 4  # éviter boucle infinie
-        rounds = 0
+        pos = first
+        orbits = 0  # compteur de sécurité
 
-        idx = start
-        while rounds < max_rounds:
-            rounds += 1
-            p = players[idx % n]
-            idx += 1
+        while orbits < n * 5:  # max 5 tours complets (cas pathologique)
+            orbits += 1
+            p = players[pos % n]
 
-            if p.status in (PlayerStatus.FOLDED, PlayerStatus.ALL_IN, PlayerStatus.ELIMINATED,
-                           PlayerStatus.SITTING_OUT, PlayerStatus.DISCONNECTED):
-                if p.user_id in acted or p.status != PlayerStatus.ACTIVE:
-                    # Check si tour terminé
-                    remaining = [x for x in players if x.status == PlayerStatus.ACTIVE]
-                    if all(x.user_id in acted for x in remaining):
-                        break
-                    continue
+            # Sauter les joueurs qui ne peuvent pas agir
+            if p.status not in (PlayerStatus.ACTIVE,):
+                if pos % n == close_seat:
+                    break
+                pos += 1
                 continue
-
-            # Si tout le monde a agi et personne n'a relancé
-            if p.user_id in acted and (last_raiser is None or last_raiser == p.user_id):
-                break
-            if p.user_id == last_raiser and p.user_id in acted:
-                break
 
             # Calculer les actions possibles
             to_call = current_bet - p.current_bet
             can_check = (to_call == 0)
-            can_call = (to_call > 0 and to_call < p.chips)
-            can_raise = (p.chips > to_call)
 
             # Quick bets
             quick_bets = QuickBetCalculator.calculate(
@@ -618,102 +739,127 @@ class PokerTable:
 
             self._current_actor = p.user_id
             self._action_event.clear()
-
             await self._broadcast_state(quick_bets=quick_bets)
 
-            # Attendre l'action avec timeout
-            try:
-                action, amount = await asyncio.wait_for(
-                    self._wait_for_action(p.user_id),
-                    timeout=ACTION_TIMEOUT,
-                )
-            except asyncio.TimeoutError:
-                # Auto-fold/check sur timeout
-                if can_check:
-                    action, amount = ActionType.CHECK, 0
-                    p.last_action = 'check (timeout)'
-                else:
-                    action, amount = ActionType.FOLD, 0
-                    p.last_action = 'fold (timeout)'
-                logger.info(f"[{self.name}] {p.username} timeout → {p.last_action}")
+            # Obtenir l'action du joueur
+            action, amount = await self._get_player_action(p, can_check)
 
             # Appliquer l'action
-            if action == ActionType.FOLD:
-                p.status = PlayerStatus.FOLDED
-                p.last_action = 'fold'
-                await self._broadcast({
-                    'type': 'player_action',
-                    'user_id': p.user_id,
-                    'action': 'fold',
-                    'amount': 0,
-                })
+            was_raise = await self._apply_action(p, action, amount, to_call, players)
 
-            elif action == ActionType.CHECK:
-                p.last_action = 'check'
-                await self._broadcast({
-                    'type': 'player_action',
-                    'user_id': p.user_id,
-                    'action': 'check',
-                    'amount': 0,
-                })
-
-            elif action == ActionType.CALL:
-                call_amt = min(to_call, p.chips)
-                p.chips -= call_amt
-                p.current_bet += call_amt
-                p.total_bet += call_amt
-                self._pot += call_amt
-                if p.chips == 0:
-                    p.status = PlayerStatus.ALL_IN
-                    p.is_all_in = True
-                p.last_action = 'call'
-                await self._broadcast({
-                    'type': 'player_action',
-                    'user_id': p.user_id,
-                    'action': 'call',
-                    'amount': call_amt,
-                })
-
-            elif action in (ActionType.RAISE, ActionType.ALL_IN):
-                if action == ActionType.ALL_IN:
-                    amount = p.chips
-
-                raise_amt = max(amount, self._min_raise)
-                raise_amt = min(raise_amt, p.chips)
-                p.chips -= raise_amt
-                p.current_bet += raise_amt
-                p.total_bet += raise_amt
-                self._pot += raise_amt
+            if was_raise:
+                # Le raise déplace le close_seat juste avant le raiser
                 current_bet = p.current_bet
-                self._min_raise = max(self._min_raise, raise_amt - to_call)
-                last_raiser = p.user_id
-                acted = {p.user_id}  # reset : tout le monde doit reagir
+                close_seat = (pos - 1 + n) % n
 
-                if p.chips == 0:
-                    p.status = PlayerStatus.ALL_IN
-                    p.is_all_in = True
-                p.last_action = 'raise' if action == ActionType.RAISE else 'all-in'
-                await self._broadcast({
-                    'type': 'player_action',
-                    'user_id': p.user_id,
-                    'action': p.last_action,
-                    'amount': raise_amt,
-                })
-
-            acted.add(p.user_id)
             self._current_actor = None
 
-            # Vérifier fin du tour
+            # Vérifier si un seul joueur actif reste
             remaining = [x for x in players if x.status == PlayerStatus.ACTIVE]
             if len(remaining) <= 1:
                 break
-            if all(x.user_id in acted for x in remaining) and last_raiser is None:
-                break
-            # Si le raiser est le seul à ne pas avoir agi et tout le monde a agi
-            if last_raiser and all(x.user_id in acted for x in remaining):
+
+            # Vérifier si on a bouclé
+            if pos % n == close_seat:
                 break
 
+            pos += 1
+
         self._current_actor = None
+
+    async def _get_player_action(self, p: PlayerState, can_check: bool) -> Tuple[ActionType, int]:
+        """Obtient l'action d'un joueur (avec check déco et timeout)"""
+        # Joueur déconnecté → auto
+        if self._ws_manager and not self._ws_manager.is_connected(self.id, p.user_id):
+            if can_check:
+                p.last_action = 'check (absent)'
+                return ActionType.CHECK, 0
+            else:
+                p.last_action = 'fold (absent)'
+                return ActionType.FOLD, 0
+
+        # Attendre l'action avec timeout
+        try:
+            return await asyncio.wait_for(
+                self._wait_for_action(p.user_id),
+                timeout=ACTION_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            if can_check:
+                p.last_action = 'check (timeout)'
+                logger.info(f"[{self.name}] {p.username} timeout → check")
+                return ActionType.CHECK, 0
+            else:
+                p.last_action = 'fold (timeout)'
+                logger.info(f"[{self.name}] {p.username} timeout → fold")
+                return ActionType.FOLD, 0
+
+    async def _apply_action(self, p: PlayerState, action: ActionType, amount: int,
+                            to_call: int, players: List[PlayerState]) -> bool:
+        """Applique une action. Retourne True si c'est un raise."""
+        if action == ActionType.FOLD:
+            p.status = PlayerStatus.FOLDED
+            p.last_action = 'fold'
+            await self._broadcast({
+                'type': 'player_action', 'user_id': p.user_id,
+                'username': p.username, 'action': 'fold', 'amount': 0,
+            })
+            return False
+
+        elif action == ActionType.CHECK:
+            p.last_action = 'check'
+            await self._broadcast({
+                'type': 'player_action', 'user_id': p.user_id,
+                'username': p.username, 'action': 'check', 'amount': 0,
+            })
+            return False
+
+        elif action == ActionType.CALL:
+            call_amt = min(to_call, p.chips)
+            p.chips -= call_amt
+            p.current_bet += call_amt
+            p.total_bet += call_amt
+            self._pot += call_amt
+            if p.chips == 0:
+                p.status = PlayerStatus.ALL_IN
+                p.is_all_in = True
+            p.last_action = 'call'
+            await self._broadcast({
+                'type': 'player_action', 'user_id': p.user_id,
+                'username': p.username, 'action': 'call', 'amount': call_amt,
+            })
+            return False
+
+        elif action in (ActionType.RAISE, ActionType.ALL_IN):
+            if action == ActionType.ALL_IN:
+                amount = p.chips
+
+            raise_amt = max(amount, self._min_raise)
+
+            # PLO pot-limit cap
+            if self.game_variant == GameVariant.PLO:
+                pot_total = self._pot + sum(x.current_bet for x in players)
+                pot_limit_max = pot_total + to_call + to_call
+                raise_amt = min(raise_amt, pot_limit_max)
+
+            raise_amt = min(raise_amt, p.chips)
+            p.chips -= raise_amt
+            p.current_bet += raise_amt
+            p.total_bet += raise_amt
+            self._pot += raise_amt
+            self._min_raise = max(self._min_raise, raise_amt - to_call)
+
+            if p.chips == 0:
+                p.status = PlayerStatus.ALL_IN
+                p.is_all_in = True
+            p.last_action = 'raise' if action == ActionType.RAISE else 'all-in'
+            await self._broadcast({
+                'type': 'player_action', 'user_id': p.user_id,
+                'username': p.username, 'action': p.last_action, 'amount': raise_amt,
+            })
+            return True
+
+        return False
 
     async def _wait_for_action(self, user_id: str) -> Tuple[ActionType, int]:
         """Attend l'action d'un joueur"""
@@ -737,95 +883,161 @@ class PokerTable:
         }
         self._action_event.set()
 
+    # ── Side Pots ─────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _calculate_side_pots(players: List[PlayerState]) -> List[dict]:
+        """
+        Calcule les side pots.
+        Retourne une liste de {'amount': int, 'eligible': [user_ids]}.
+        """
+        non_folded = [p for p in players if p.status != PlayerStatus.FOLDED]
+        all_bets = sorted(set(p.total_bet for p in players if p.total_bet > 0))
+
+        if not all_bets:
+            return []
+
+        pots = []
+        prev_level = 0
+
+        for level in all_bets:
+            increment = level - prev_level
+            if increment <= 0:
+                continue
+
+            # Joueurs qui ont contribué au moins ce level
+            contributors = [p for p in players if p.total_bet >= level]
+            pot_amount = increment * len(contributors)
+
+            # Éligibles = non-foldés parmi les contributors
+            eligible = [p.user_id for p in contributors if p.status != PlayerStatus.FOLDED]
+
+            if pot_amount > 0 and eligible:
+                pots.append({'amount': pot_amount, 'eligible': eligible})
+
+            prev_level = level
+
+        return pots
+
     # ── Showdown ──────────────────────────────────────────────────────────────
 
     async def _determine_winner(self, players: List[PlayerState]):
-        """Détermine le(s) gagnant(s) et distribue le pot"""
+        """Détermine le(s) gagnant(s) avec side pots et distribue"""
         non_folded = [p for p in players if p.status != PlayerStatus.FOLDED]
 
         if len(non_folded) == 1:
             winner = non_folded[0]
             winner.chips += self._pot
+            winners_list = [{'user_id': winner.user_id, 'username': winner.username,
+                            'amount': self._pot, 'hand': 'Last standing'}]
             await self._broadcast({
                 'type': 'hand_result',
-                'winners': [{'user_id': winner.user_id, 'username': winner.username,
-                            'amount': self._pot, 'hand': 'Last standing'}],
+                'winners': winners_list,
                 'pot': self._pot,
                 'community_cards': self._community_cards,
             })
+            self._save_hand_history(
+                self._hand_round, players, winners_list,
+                self._community_cards, self._pot,
+            )
             return
 
         # Évaluation des mains avec PokerKit
-        # Pour simplifier on compare les mains manuellement
-        # (le state PokerKit n'est pas toujours synchronisé dans notre boucle custom)
-        from pokerkit import StandardHighHand, Card as PKCard
+        from pokerkit import StandardHighHand, OmahaHoldemHand
 
-        best_hands = []
+        player_hands = {}
         for p in non_folded:
             try:
-                all_cards = p.hole_cards + self._community_cards
-                pk_cards = []
-                for c in all_cards:
-                    rank_map = {'T': '10', 'J': 'J', 'Q': 'Q', 'K': 'K', 'A': 'A'}
-                    rank_str = rank_map.get(c[0], c[0])
-                    suit_str = c[1]
-                    pk_cards.append(PKCard(c))
-
+                hole_str = ''.join(p.hole_cards)
+                board_str = ''.join(self._community_cards)
                 if self.game_variant == GameVariant.PLO:
-                    # PLO : exactement 2 des 4 hole cards + 3 du board
-                    from itertools import combinations
-                    best = None
-                    for hole_combo in combinations(range(len(p.hole_cards)), 2):
-                        for board_combo in combinations(range(len(self._community_cards)), 3):
-                            combo = [PKCard(p.hole_cards[i]) for i in hole_combo] + \
-                                    [PKCard(self._community_cards[i]) for i in board_combo]
-                            hand = StandardHighHand.from_game(combo)
-                            if best is None or hand > best:
-                                best = hand
-                    best_hands.append((p, best))
+                    hand = OmahaHoldemHand.from_game(hole_str, board_str)
                 else:
-                    # Hold'em : meilleure main de 5 parmi 7
-                    from itertools import combinations
-                    best = None
-                    for combo in combinations([PKCard(c) for c in all_cards], 5):
-                        hand = StandardHighHand.from_game(combo)
-                        if best is None or hand > best:
-                            best = hand
-                    best_hands.append((p, best))
+                    hand = StandardHighHand.from_game(hole_str, board_str)
+                player_hands[p.user_id] = hand
             except Exception as e:
                 logger.error(f"[{self.name}] Hand eval error for {p.username}: {e}")
-                best_hands.append((p, None))
+                player_hands[p.user_id] = None
 
-        # Trier par force de main (descending)
-        best_hands.sort(key=lambda x: x[1] if x[1] else 0, reverse=True)
+        # Side pots
+        side_pots = self._calculate_side_pots(players)
 
-        if best_hands:
-            winning_hand = best_hands[0][1]
-            winners = [ph for ph, h in best_hands if h == winning_hand]
-            share = self._pot // len(winners)
-            remainder = self._pot % len(winners)
+        if not side_pots:
+            # Fallback : pot unique
+            side_pots = [{'amount': self._pot, 'eligible': [p.user_id for p in non_folded]}]
 
-            for i, w in enumerate(winners):
-                w.chips += share + (1 if i < remainder else 0)
+        all_winners = []
+        total_distributed = 0
 
-            # Broadcast showdown
-            showdown_data = []
-            for p in non_folded:
-                showdown_data.append({
-                    'user_id': p.user_id,
-                    'username': p.username,
-                    'hole_cards': p.hole_cards,
-                })
+        for pot_info in side_pots:
+            pot_amount = pot_info['amount']
+            eligible_ids = pot_info['eligible']
 
-            await self._broadcast({
-                'type': 'hand_result',
-                'winners': [{'user_id': w.user_id, 'username': w.username,
-                            'amount': share, 'hand': str(winning_hand) if winning_hand else '?'}
-                           for w in winners],
-                'pot': self._pot,
-                'community_cards': self._community_cards,
-                'showdown': showdown_data,
-            })
+            # Trouver le meilleur parmi les éligibles
+            eligible_hands = [
+                (uid, player_hands.get(uid))
+                for uid in eligible_ids
+                if player_hands.get(uid) is not None
+            ]
+
+            if not eligible_hands:
+                # Personne n'a de main valide — partager entre éligibles
+                share = pot_amount // len(eligible_ids)
+                for uid in eligible_ids:
+                    player = next((p for p in players if p.user_id == uid), None)
+                    if player:
+                        player.chips += share
+                continue
+
+            best_hand = max(eligible_hands, key=lambda x: x[1])[1]
+            pot_winners = [uid for uid, h in eligible_hands if h == best_hand]
+
+            share = pot_amount // len(pot_winners)
+            remainder = pot_amount % len(pot_winners)
+
+            for i, uid in enumerate(pot_winners):
+                player = next((p for p in players if p.user_id == uid), None)
+                if player:
+                    won = share + (1 if i < remainder else 0)
+                    player.chips += won
+                    total_distributed += won
+                    all_winners.append({
+                        'user_id': uid,
+                        'username': player.username,
+                        'amount': won,
+                        'hand': str(best_hand),
+                    })
+
+        # Broadcast showdown
+        showdown_data = [
+            {'user_id': p.user_id, 'username': p.username, 'hole_cards': p.hole_cards}
+            for p in non_folded
+        ]
+
+        # Dédupliquer les winners (un joueur peut gagner plusieurs pots)
+        merged_winners = {}
+        for w in all_winners:
+            uid = w['user_id']
+            if uid in merged_winners:
+                merged_winners[uid]['amount'] += w['amount']
+            else:
+                merged_winners[uid] = dict(w)
+
+        await self._broadcast({
+            'type': 'hand_result',
+            'winners': list(merged_winners.values()),
+            'pot': self._pot,
+            'side_pots': [{'amount': sp['amount'], 'players': sp['eligible']} for sp in side_pots],
+            'community_cards': self._community_cards,
+            'showdown': showdown_data,
+        })
+
+        # Sauvegarder l'historique
+        self._save_hand_history(
+            self._hand_round, players,
+            list(merged_winners.values()),
+            self._community_cards, self._pot,
+        )
 
     # ── État ──────────────────────────────────────────────────────────────────
 
@@ -834,6 +1046,11 @@ class PokerTable:
         for uid, ps in self.players.items():
             hide = (for_user_id is None or uid != for_user_id)
             players_data.append(ps.to_dict(hide_cards=hide))
+
+        # Calculer le current_bet de la table (max bet en cours)
+        table_current_bet = 0
+        if self.players:
+            table_current_bet = max((p.current_bet for p in self.players.values()), default=0)
 
         return {
             'table_id': self.id,
@@ -844,6 +1061,7 @@ class PokerTable:
             'pot': self._pot,
             'community_cards': self._community_cards,
             'current_actor': self._current_actor,
+            'current_bet': table_current_bet,
             'action_timer': self._action_timeout_remaining,
             'action_timeout_total': ACTION_TIMEOUT,
             'min_raise': self._min_raise,
@@ -918,6 +1136,7 @@ class PokerTable:
                 'tournament_id': self.tournament_id,
                 'game_variant': self.game_variant.value,
                 'small_blind': self.small_blind, 'big_blind': self.big_blind,
+                'ante': self.ante,
                 'max_players': self.max_players,
                 'hand_round': self._hand_round, 'dealer_btn': self._dealer_btn,
                 'status': self.status.value if hasattr(self.status, 'value') else str(self.status),
@@ -936,6 +1155,40 @@ class PokerTable:
                 json.dump(data, f, indent=2)
         except Exception as e:
             logger.error(f"[{self.name}] save_state: {e}")
+
+    def _save_hand_history(self, hand_round: int, players: List[PlayerState],
+                           winners: list, community_cards: list, pot: int):
+        """Sauvegarde l'historique d'une main sur disque"""
+        try:
+            table_dir = HISTORY_DIR / self.id
+            table_dir.mkdir(parents=True, exist_ok=True)
+            data = {
+                'table_id': self.id,
+                'table_name': self.name,
+                'tournament_id': self.tournament_id,
+                'game_variant': self.game_variant.value,
+                'hand': hand_round,
+                'small_blind': self.small_blind,
+                'big_blind': self.big_blind,
+                'ante': self.ante,
+                'pot': pot,
+                'community_cards': community_cards,
+                'players': [
+                    {
+                        'user_id': p.user_id, 'username': p.username,
+                        'hole_cards': p.hole_cards, 'chips_before': p.chips + p.total_bet,
+                        'chips_after': p.chips, 'total_bet': p.total_bet,
+                        'status': p.status.value if hasattr(p.status, 'value') else str(p.status),
+                    }
+                    for p in players
+                ],
+                'winners': winners,
+                'timestamp': datetime.utcnow().isoformat(),
+            }
+            with open(table_dir / f"hand_{hand_round:06d}.json", 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.error(f"[{self.name}] save_hand_history: {e}")
 
     def _delete_state(self):
         try:

@@ -14,6 +14,7 @@
             <div class="logo">♠ PokerEndPasse</div>
             <nav class="header-nav">
                 <span id="userDisplay" class="user-info"></span>
+                <button id="profileBtn" class="btn-small" style="display:none">👤 Profil</button>
                 <button id="loginBtn" class="btn-secondary">Connexion</button>
                 <button id="registerBtn" class="btn-secondary">Inscription</button>
                 <button id="optionsBtn" class="btn-small">⚙️</button>
@@ -95,6 +96,24 @@
                 <div class="form-group"><label>Action auto :</label><select id="autoAction"><option value="never">Jamais</option><option value="check_fold">Check/Fold</option></select></div>
                 <div class="form-group"><label>Historique :</label><select id="showHistory"><option value="all">Tout</option><option value="mine">Mes mains</option><option value="none">Masqué</option></select></div>
                 <button id="saveSettings" class="btn-primary">Sauvegarder</button>
+            </div>
+        </div>
+
+        <!-- Profile Modal -->
+        <div id="profileModal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>👤 Mon Profil</h2>
+                <div style="text-align:center;margin-bottom:16px">
+                    <img id="profileAvatar" src="/assets/avatars/default.svg" style="width:80px;height:80px;border-radius:50%;border:3px solid var(--accent);object-fit:cover">
+                </div>
+                <div class="form-group">
+                    <label>Changer d'avatar :</label>
+                    <input type="file" id="avatarUpload" accept="image/jpeg,image/png,image/gif,image/webp">
+                    <small style="color:var(--text-muted)">Max 2 Mo — JPG, PNG, GIF, WebP</small>
+                </div>
+                <div id="uploadStatus" style="margin-top:8px"></div>
+                <button id="uploadAvatarBtn" class="btn-primary" style="margin-top:12px">Sauvegarder</button>
             </div>
         </div>
 

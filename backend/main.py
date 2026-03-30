@@ -342,6 +342,63 @@ async def get_my_tournament_table(tid: str, user_id: str):
     raise HTTPException(status_code=404, detail="Player not found")
 
 
+# ── Hand History ──────────────────────────────────────────────────────────
+
+@app.get("/api/tables/{table_id}/history")
+async def get_table_history(table_id: str, limit: int = 20, offset: int = 0):
+    """Retourne l'historique des mains d'une table"""
+    from .game_engine import HISTORY_DIR
+    history_dir = HISTORY_DIR / table_id
+    if not history_dir.exists():
+        return json_response([])
+    files = sorted(history_dir.glob("hand_*.json"), reverse=True)
+    result = []
+    for f in files[offset:offset + limit]:
+        try:
+            with open(f) as fh:
+                result.append(json.load(fh))
+        except Exception:
+            pass
+    return json_response(result)
+
+@app.get("/api/tables/{table_id}/history/{hand_number}")
+async def get_hand_detail(table_id: str, hand_number: int):
+    """Retourne le détail d'une main"""
+    from .game_engine import HISTORY_DIR
+    path = HISTORY_DIR / table_id / f"hand_{hand_number:06d}.json"
+    if not path.exists():
+        raise HTTPException(status_code=404)
+    try:
+        with open(path) as f:
+            return json_response(json.load(f))
+    except Exception:
+        raise HTTPException(status_code=500)
+
+
+# ── Tournament Results ────────────────────────────────────────────────────
+
+@app.get("/tournament/{tid}/results", response_class=HTMLResponse)
+async def tournament_results_page(tid: str):
+    return HTMLResponse(read_html(FRONTEND_DIR / "tournament_results.html").replace("{{ tournament_id }}", tid))
+
+@app.get("/api/tournaments/{tid}/results")
+async def get_tournament_results(tid: str):
+    t = tournament_manager.get_tournament(tid)
+    if not t:
+        raise HTTPException(status_code=404)
+    return json_response({
+        'id': t.id, 'name': t.name,
+        'status': t.status,
+        'game_variant': t.game_variant,
+        'prize_pool': t.prize_pool,
+        'ranking': t.get_ranking(),
+        'winners': t.winners,
+        'current_level': t.current_level,
+        'blind_structure': t.blind_structure,
+        'players_count': len(t.players),
+    })
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # ADMIN
 # ══════════════════════════════════════════════════════════════════════════════

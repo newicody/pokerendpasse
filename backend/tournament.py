@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
-from .models import TournamentStatus, GameVariant
+from .models import TournamentStatus, GameVariant, PlayerStatus
 
 logger = logging.getLogger(__name__)
 
@@ -613,41 +613,134 @@ class TournamentManager:
         for table_id in tournament.tables:
             table = self.lobby.tables.get(table_id)
             if table:
-                table.update_blinds(blinds['small_blind'], blinds['big_blind'])
+                table.update_blinds(
+                    blinds['small_blind'],
+                    blinds['big_blind'],
+                    blinds.get('ante', 0),
+                )
 
     # ── Rééquilibrage ─────────────────────────────────────────────────────────
 
     async def rebalance_tables(self, tournament: Tournament):
+        """
+        Rééquilibre les tables :
+        1. Ferme les tables vides
+        2. Si une table peut absorber tous les joueurs d'une autre → merge
+        3. Si écart > 2 entre tables → déplace un joueur de la plus grande vers la plus petite
+        """
         if not self.lobby or len(tournament.tables) < 2:
             return
 
-        table_counts = {}
-        for tid in tournament.tables:
+        # Compter les joueurs actifs par table
+        table_counts: Dict[str, int] = {}
+        for tid in list(tournament.tables):
             table = self.lobby.tables.get(tid)
             if table:
-                active = len([p for p in table.players.values() if p.chips > 0])
+                active = len([p for p in table.players.values()
+                             if p.chips > 0 and p.status != 'eliminated'])
                 table_counts[tid] = active
+            else:
+                # Table n'existe plus
+                tournament.tables.remove(tid)
 
         if not table_counts:
             return
 
-        # Fermer les tables vides
-        for tid, count in list(table_counts.items()):
-            if count == 0:
+        # 1. Fermer les tables vides
+        for tid in list(table_counts.keys()):
+            if table_counts[tid] == 0:
                 tournament.tables.remove(tid)
                 await self.lobby.close_table(tid)
                 del table_counts[tid]
+                logger.info(f"[{tournament.id}] Table vide fermée: {tid}")
 
-        # Rééquilibrer si écart > 2
         if len(table_counts) < 2:
             return
 
-        min_count = min(table_counts.values())
-        max_count = max(table_counts.values())
+        # 2. Merge si une table a assez peu de joueurs pour être absorbée
+        sorted_tables = sorted(table_counts.items(), key=lambda x: x[1])
+        smallest_tid, smallest_count = sorted_tables[0]
+        largest_tid, largest_count = sorted_tables[-1]
 
-        if max_count - min_count > 2:
-            logger.info(f"[{tournament.id}] Rebalancing needed: {table_counts}")
-            # TODO: implémenter le déplacement de joueurs
+        # Vérifier si la plus petite table peut être absorbée par une autre
+        for dest_tid, dest_count in sorted_tables[1:]:
+            dest_table = self.lobby.tables.get(dest_tid)
+            if not dest_table:
+                continue
+            available_seats = dest_table.max_players - dest_count
+            if available_seats >= smallest_count and smallest_count > 0:
+                # Déplacer tous les joueurs de smallest vers dest
+                src_table = self.lobby.tables.get(smallest_tid)
+                if src_table:
+                    await self._move_players(tournament, src_table, dest_table,
+                                            list(src_table.players.keys()))
+                    tournament.tables.remove(smallest_tid)
+                    await self.lobby.close_table(smallest_tid)
+                    logger.info(f"[{tournament.id}] Table {smallest_tid} fusionnée dans {dest_tid}")
+                    self.save_tournament(tournament)
+                    return  # un seul rééquilibrage par cycle
+
+        # 3. Si écart > 2, déplacer un joueur
+        if largest_count - smallest_count > 2:
+            src_table = self.lobby.tables.get(largest_tid)
+            dest_table = self.lobby.tables.get(smallest_tid)
+            if src_table and dest_table:
+                # Choisir le joueur avec le moins de chips (moins perturbant)
+                candidates = sorted(
+                    [p for p in src_table.players.values()
+                     if p.chips > 0 and p.status != PlayerStatus.ELIMINATED],
+                    key=lambda p: p.chips,
+                )
+                if candidates:
+                    player = candidates[0]
+                    await self._move_players(tournament, src_table, dest_table,
+                                            [player.user_id])
+                    logger.info(f"[{tournament.id}] Moved {player.username} from {largest_tid} to {smallest_tid}")
+                    self.save_tournament(tournament)
+
+    async def _move_players(self, tournament: Tournament,
+                           src_table, dest_table, user_ids: list):
+        """Déplace des joueurs d'une table à une autre"""
+        ws = self._get_ws_manager()
+
+        for uid in user_ids:
+            if uid not in src_table.players:
+                continue
+            player_state = src_table.players[uid]
+            chips = player_state.chips
+            username = player_state.username
+            avatar = player_state.avatar
+
+            # Retirer de la source
+            src_table.remove_player(uid)
+            if self.lobby:
+                self.lobby.user_to_table.pop(uid, None)
+
+            # Ajouter à la destination
+            dest_table.add_player(uid, username, chips, avatar)
+            if self.lobby:
+                self.lobby.user_to_table[uid] = dest_table.id
+
+            # Mettre à jour dans le tournoi
+            for p in tournament.players:
+                if p['user_id'] == uid:
+                    p['table_id'] = dest_table.id
+                    break
+
+            # Notifier le joueur
+            if ws:
+                await ws.broadcast_to_table(src_table.id, {
+                    'type': 'player_moved',
+                    'user_id': uid, 'username': username,
+                    'to_table': dest_table.id,
+                })
+                # Le joueur devra se reconnecter au WS de la nouvelle table
+                await ws.send_to_user(src_table.id, uid, {
+                    'type': 'table_change',
+                    'new_table_id': dest_table.id,
+                    'new_table_name': dest_table.name,
+                    'message': f'Vous avez été déplacé à {dest_table.name}',
+                })
 
     # ── Événements WebSocket ──────────────────────────────────────────────────
 

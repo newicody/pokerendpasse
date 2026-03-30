@@ -48,19 +48,27 @@ function updateAuthUI() {
     const registerBtn = $('registerBtn');
     const logoutBtn = $('logoutBtn');
     const adminLink = $('adminLink');
+    const profileBtn = $('profileBtn');
 
     if (currentUser) {
         if (display) display.textContent = `👤 ${currentUser.username}`;
         if (loginBtn) loginBtn.style.display = 'none';
         if (registerBtn) registerBtn.style.display = 'none';
         if (logoutBtn) logoutBtn.style.display = '';
+        if (profileBtn) profileBtn.style.display = '';
         if (adminLink) adminLink.style.display = currentUser.is_admin ? '' : 'none';
         if ($('chatInput')) { $('chatInput').disabled = false; $('chatSend').disabled = false; }
+        // Mettre à jour l'avatar dans le profil
+        const avatar = $('profileAvatar');
+        if (avatar && currentUser.avatar && currentUser.avatar !== 'default') {
+            avatar.src = currentUser.avatar;
+        }
     } else {
         if (display) display.textContent = '';
         if (loginBtn) loginBtn.style.display = '';
         if (registerBtn) registerBtn.style.display = '';
         if (logoutBtn) logoutBtn.style.display = 'none';
+        if (profileBtn) profileBtn.style.display = 'none';
         if (adminLink) adminLink.style.display = 'none';
     }
 }
@@ -146,6 +154,9 @@ function renderTournaments(tournaments) {
         }
         if (t.status === 'in_progress' && isRegistered) {
             actionBtn = `<button class="btn-primary btn-small" onclick="joinMyTable('${t.id}')">Rejoindre ma table</button>`;
+        }
+        if (t.status === 'finished') {
+            actionBtn = `<a href="/tournament/${t.id}/results" class="btn-primary btn-small">📊 Résultats</a>`;
         }
         const spectateBtn = t.status === 'in_progress' && t.tables?.length
             ? `<a href="/table/${t.tables[0]}" class="btn-small">👁️ Regarder</a>` : '';
@@ -309,6 +320,7 @@ function setupModals() {
     $('loginBtn')?.addEventListener('click', () => openModal('loginModal'));
     $('registerBtn')?.addEventListener('click', () => openModal('registerModal'));
     $('logoutBtn')?.addEventListener('click', logout);
+    $('profileBtn')?.addEventListener('click', () => openModal('profileModal'));
 
     $('loginForm')?.addEventListener('submit', (e) => {
         e.preventDefault();
@@ -317,6 +329,42 @@ function setupModals() {
     $('registerForm')?.addEventListener('submit', (e) => {
         e.preventDefault();
         register($('regUsername').value, $('regPassword').value, $('regEmail')?.value);
+    });
+
+    // Avatar upload
+    $('uploadAvatarBtn')?.addEventListener('click', async () => {
+        const fileInput = $('avatarUpload');
+        const statusEl = $('uploadStatus');
+        if (!fileInput?.files?.length) {
+            if (statusEl) statusEl.textContent = 'Sélectionnez un fichier';
+            return;
+        }
+        const file = fileInput.files[0];
+        if (file.size > 2 * 1024 * 1024) {
+            if (statusEl) statusEl.textContent = 'Fichier trop volumineux (max 2 Mo)';
+            return;
+        }
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            if (statusEl) statusEl.textContent = 'Upload en cours…';
+            const resp = await fetch('/api/profile/avatar', { method: 'POST', body: formData });
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data.avatar) {
+                    currentUser.avatar = data.avatar;
+                    const img = $('profileAvatar');
+                    if (img) img.src = data.avatar;
+                }
+                if (statusEl) statusEl.innerHTML = '<span style="color:var(--success)">Avatar mis à jour!</span>';
+                showToast('Avatar mis à jour', 'success');
+            } else {
+                const err = await resp.json().catch(() => ({}));
+                if (statusEl) statusEl.textContent = err.detail || 'Erreur upload';
+            }
+        } catch (e) {
+            if (statusEl) statusEl.textContent = 'Erreur réseau';
+        }
     });
 
     document.querySelectorAll('.modal .close').forEach(btn => {
