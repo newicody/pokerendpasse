@@ -1,3 +1,4 @@
+* frontend/css/common.css */
 /* ═══════════════════════════════════════════════════════════════════════════
    common.css — Styles communs PokerEndPasse
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -121,3 +122,46 @@ a:hover { color: var(--accent-light); text-decoration: underline; }
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+
+/* ── Local time ───────────────────────────────────────────────────────── */
+.local-time {
+    font-size: 12px;
+    background: var(--bg-secondary);
+    padding: 4px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--border-subtle);
+    font-family: 'Fira Mono', monospace;
+}
+/* Style pour la modale des options */
+.options-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+.options-tab {
+    padding: 8px 16px;
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 14px;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+}
+.options-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+.options-tab-content {
+    display: none;
+}
+.options-tab-content.active {
+    display: block;
+}
+/* Taille de police chat */
+[data-chat-font-size="small"] .tchat-msg { font-size: 11px; }
+[data-chat-font-size="medium"] .tchat-msg { font-size: 13px; }
+[data-chat-font-size="large"] .tchat-msg { font-size: 15px; }

@@ -2,11 +2,10 @@
 """
 FastAPI Application — PokerEndPasse
 ====================================
-Consolidé avec :
-- Admin : pause/resume, mute, exclude
-- Quick bets endpoint
-- Lifecycle propre
-- Heartbeat WS
+Version corrigée :
+- Ajout des await manquants pour save_tournament
+- Bouton Options unique (profil, admin, paramètres)
+- Gestion des reconnexions après redémarrage
 """
 
 import copy
@@ -31,7 +30,7 @@ from .models import (
     ActionType, CreateUserRequest, TableStatus, AdminActionRequest,
     LoginRequest, RegisterRequest, UpdateProfileRequest, ChangePasswordRequest,
     CreateTournamentRequest, RegisterTournamentRequest, UpdateTournamentRequest,
-    GameVariant,
+    GameVariant, TournamentStatus,
 )
 from .lobby import Lobby
 from .websocket_manager import WebSocketManager
@@ -80,7 +79,6 @@ async def lifespan(app: FastAPI):
     await lobby.stop()
     await ws_manager.stop()
     logger.info("Server stopped")
-
 
 app = FastAPI(title="PokerEndPasse Freeroll Tournaments", version="2.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
@@ -151,6 +149,10 @@ chat_manager = ChatManager()
 # PAGES
 # ══════════════════════════════════════════════════════════════════════════════
 
+async def check_lobby_ready():
+    if not lobby._ready:
+        raise HTTPException(status_code=503, detail="Server still starting, please retry")
+
 @app.get("/", response_class=HTMLResponse)
 async def root():
     return HTMLResponse('<script>window.location.href="/lobby";</script>')
@@ -185,15 +187,44 @@ async def register(request: RegisterRequest, req: Request):
         raise HTTPException(status_code=400, detail="Username already exists")
     return json_response({"success": True})
 
+@app.post("/api/admin/tables/{table_id}/start")
+async def force_start_table(table_id: str, _: Dict = Depends(require_admin)):
+    table = lobby.tables.get(table_id)
+    if not table:
+        raise HTTPException(status_code=404)
+    if table._game_task:
+        return {"success": False, "message": "Game already running"}
+    table._try_start_game()
+    if not table._game_task:
+        active = [p for p in table.players.values() if p.chips > 0]
+        if len(active) >= 2:
+            table._game_task = asyncio.create_task(table._game_loop())
+            return {"success": True, "message": f"Game started with {len(active)} players"}
+        else:
+            return {"success": False, "message": f"Not enough players: {len(active)}/2"}
+    return {"success": True, "message": "Game start triggered"}
+
 @app.post("/api/auth/login")
 async def login(request: LoginRequest, req: Request):
+    global maintenance_mode
     ip = get_client_ip(req)
     if not login_limiter.is_allowed(ip):
         retry = login_limiter.get_retry_after(ip)
         raise HTTPException(status_code=429, detail=f"Too many attempts. Retry in {retry}s.")
+
+    # Vérifier mode maintenance
+    if maintenance_mode:
+        # On ne peut pas savoir si c'est un admin avant authentification, donc on laisse passer
+        # mais on pourrait vérifier après authentification et rejeter si non-admin
+        pass
+
     user = auth_manager.authenticate(request.username, request.password)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    if maintenance_mode and not user.get('is_admin'):
+        raise HTTPException(status_code=503, detail="Server in maintenance mode")
+
     session_id = auth_manager.create_session(user['id'])
     cookie = get_cookie_params(req)
     max_age = 604800 if request.remember_me else 86400
@@ -210,6 +241,38 @@ async def logout(req: Request):
     resp.delete_cookie("poker_session")
     return resp
 
+@app.get("/api/tables/{table_id}/debug")
+async def debug_table(table_id: str):
+    table = lobby.tables.get(table_id)
+    if not table:
+        raise HTTPException(status_code=404)
+    return {
+        "table_id": table.id,
+        "name": table.name,
+        "status": table.status.value if hasattr(table.status, 'value') else str(table.status),
+        "players": [
+            {
+                "user_id": p.user_id,
+                "username": p.username,
+                "status": p.status.value if hasattr(p.status, 'value') else str(p.status),
+                "chips": p.chips,
+                "current_bet": p.current_bet,
+                "is_dealer": p.is_dealer,
+                "is_small_blind": p.is_small_blind,
+                "is_big_blind": p.is_big_blind,
+                "is_all_in": p.is_all_in,
+                "connected": table._ws_manager.is_connected(table_id, p.user_id) if table._ws_manager else False
+            }
+            for p in table.players.values()
+        ],
+        "current_actor": table._current_actor,
+        "hand_round": table._hand_round,
+        "street": table._street,
+        "pot": table._pot,
+        "community_cards": table._community_cards,
+        "game_task_running": table._game_task is not None
+    }
+
 @app.get("/api/auth/me")
 async def get_me(current_user: Dict = Depends(get_current_user_optional)):
     if not current_user:
@@ -221,7 +284,7 @@ async def get_me(current_user: Dict = Depends(get_current_user_optional)):
 # TABLES
 # ══════════════════════════════════════════════════════════════════════════════
 
-@app.get("/api/tables")
+@app.get("/api/tables", dependencies=[Depends(check_lobby_ready)])
 async def list_tables():
     tables = await lobby.list_tables()
     return json_response([t.model_dump() for t in tables])
@@ -249,7 +312,7 @@ async def leave_table(table_id: str, user_id: str):
 # TOURNAMENTS
 # ══════════════════════════════════════════════════════════════════════════════
 
-@app.get("/api/tournaments")
+@app.get("/api/tournaments", dependencies=[Depends(check_lobby_ready)])
 async def list_tournaments():
     result = []
     for t in tournament_manager.list_tournaments():
@@ -319,7 +382,7 @@ async def register_tournament(tid: str, request: RegisterTournamentRequest):
     avatar = user.get('avatar') if user else None
     if not t.register_player(request.user_id, username, avatar):
         raise HTTPException(status_code=400, detail="Cannot register")
-    tournament_manager.save_tournament(t)
+    await tournament_manager.save_tournament(t)  # <-- AJOUT await
     return json_response({"success": True})
 
 @app.post("/api/tournaments/{tid}/unregister")
@@ -328,25 +391,286 @@ async def unregister_tournament(tid: str, request: RegisterTournamentRequest):
     if not t:
         raise HTTPException(status_code=404)
     t.unregister_player(request.user_id)
-    tournament_manager.save_tournament(t)
+    await tournament_manager.save_tournament(t)  # <-- AJOUT await
     return json_response({"success": True})
 
-@app.get("/api/tournaments/{tid}/my-table")
-async def get_my_tournament_table(tid: str, user_id: str):
+@app.post("/api/admin/rate-limit/reset/{user_id}")
+async def reset_rate_limit(user_id: str, _: Dict = Depends(require_admin)):
+    if user_id in lobby._join_attempts:
+        lobby._join_attempts.pop(user_id)
+    return {"success": True, "message": f"Rate limit reset for {user_id}"}
+
+@app.post("/api/tournaments/{tid}/rejoin")
+async def rejoin_tournament(tid: str, request: RegisterTournamentRequest, current_user: Dict = Depends(get_current_user)):
+    """Réassigne un joueur à sa table après reconnexion."""
+    t = tournament_manager.get_tournament(tid)
+    if not t:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    player = None
+    for p in t.players:
+        if p['user_id'] == request.user_id:
+            player = p
+            break
+
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not registered")
+
+    logger.info(f"Rejoin request for player {request.user_id} in tournament {tid}, status={t.status}, table_id={player.get('table_id')}")
+
+    if t.status in (TournamentStatus.IN_PROGRESS, TournamentStatus.PAUSED):
+        table_id = player.get('table_id')
+
+        if table_id:
+            table = lobby.tables.get(table_id)
+            if table:
+                if request.user_id in table.players:
+                    logger.info(f"Player {request.user_id} already in table {table_id}")
+                    return json_response({
+                        "success": True,
+                        "table_id": table_id,
+                        "already_joined": True
+                    })
+                else:
+                    user = auth_manager.get_user_by_id(request.user_id)
+                    username = user['username'] if user else request.user_id
+                    avatar = user.get('avatar') if user else None
+                    chips = player.get('chips', t.starting_chips)
+
+                    success = await lobby.join_table(request.user_id, table_id)
+                    if success:
+                        logger.info(f"Player {request.user_id} rejoined table {table_id}")
+                        return json_response({
+                            "success": True,
+                            "table_id": table_id,
+                            "already_joined": False
+                        })
+            else:
+                logger.warning(f"Table {table_id} not found in lobby for player {request.user_id}")
+
+        # Si pas de table assignée ou table inexistante, chercher une table disponible
+        for existing_table_id in t.tables:
+            existing_table = lobby.tables.get(existing_table_id)
+            if existing_table and len(existing_table.players) < existing_table.max_players:
+                user = auth_manager.get_user_by_id(request.user_id)
+                username = user['username'] if user else request.user_id
+                avatar = user.get('avatar') if user else None
+                chips = player.get('chips', t.starting_chips)
+
+                success = await lobby.join_table(request.user_id, existing_table_id)
+                if success:
+                    player['table_id'] = existing_table_id
+                    await tournament_manager.save_tournament(t)
+                    logger.info(f"Player {request.user_id} assigned to existing table {existing_table_id}")
+                    return json_response({
+                        "success": True,
+                        "table_id": existing_table_id,
+                        "already_joined": False
+                    })
+
+        # Si aucune table trouvée mais que le tournoi est en cours, créer une nouvelle table
+        if t.tables:
+            table_id = t.tables[0]
+            table = lobby.tables.get(table_id)
+            if table:
+                success = await lobby.join_table(request.user_id, table_id)
+                if success:
+                    player['table_id'] = table_id
+                    await tournament_manager.save_tournament(t)
+                    logger.info(f"Player {request.user_id} joined first available table {table_id}")
+                    return json_response({
+                        "success": True,
+                        "table_id": table_id,
+                        "already_joined": False
+                    })
+
+    if t.status == TournamentStatus.REGISTRATION:
+        return json_response({
+            "success": True,
+            "status": "registration",
+            "message": "Tournament in registration, please re-register"
+        })
+
+    raise HTTPException(status_code=404, detail="No available table found")
+
+@app.post("/api/admin/tournaments/{tid}/reconnect-all")
+async def admin_reconnect_all(tid: str, _: Dict = Depends(require_admin)):
+    """Force la reconnexion de tous les joueurs d'un tournoi après un crash."""
     t = tournament_manager.get_tournament(tid)
     if not t:
         raise HTTPException(status_code=404)
-    for p in t.players:
-        if p['user_id'] == user_id and p.get('table_id'):
-            return json_response({"table_id": p['table_id'], "position": p.get('position', 0)})
-    raise HTTPException(status_code=404, detail="Player not found")
 
+    results = []
+    for player in t.players:
+        if player.get('status') == 'eliminated':
+            continue
+
+        user_id = player['user_id']
+        table_id = player.get('table_id')
+
+        if table_id:
+            table = lobby.tables.get(table_id)
+            if table and user_id not in table.players:
+                user = auth_manager.get_user_by_id(user_id)
+                username = user['username'] if user else user_id
+                avatar = user.get('avatar') if user else None
+                chips = player.get('chips', t.starting_chips)
+
+                success = await lobby.join_table(user_id, table_id)
+                results.append({
+                    "user_id": user_id,
+                    "username": username,
+                    "success": success,
+                    "table_id": table_id
+                })
+            elif not table:
+                results.append({
+                    "user_id": user_id,
+                    "username": player['username'],
+                    "success": False,
+                    "error": f"Table {table_id} not found"
+                })
+            else:
+                results.append({
+                    "user_id": user_id,
+                    "username": player['username'],
+                    "success": True,
+                    "already_in_table": True
+                })
+
+    return json_response({
+        "success": True,
+        "tournament": t.name,
+        "results": results
+    })
+
+@app.post("/api/admin/tournaments/{tid}/restart-tables")
+async def restart_tournament_tables(tid: str, _: Dict = Depends(require_admin)):
+    t = tournament_manager.get_tournament(tid)
+    if not t:
+        raise HTTPException(status_code=404)
+    for table_id in t.tables:
+        table = lobby.tables.get(table_id)
+        if table and not table._game_task:
+            table._try_start_game()
+    return {"success": True}
+
+@app.get("/api/tournaments/{tid}/my-table", dependencies=[Depends(check_lobby_ready)])
+async def get_my_tournament_table(tid: str, user_id: str):
+    t = tournament_manager.get_tournament(tid)
+    if not t:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    logger.info(f"[REJOIN] Looking for player {user_id} in tournament {tid} (status={t.status})")
+
+    for p in t.players:
+        if p['user_id'] == user_id:
+            table_id = p.get('table_id')
+            logger.info(f"[REJOIN] Player found, table_id={table_id}")
+
+            if table_id:
+                table = lobby.tables.get(table_id)
+                if table:
+                    if user_id in table.players:
+                        logger.info(f"[REJOIN] Player already in table {table_id}")
+                        return json_response({
+                            "table_id": table_id,
+                            "position": p.get('position', 0),
+                            "table_name": table.name
+                        })
+                    else:
+                        logger.info(f"[REJOIN] Adding player to existing table {table_id}")
+                        success = await lobby.join_table(user_id, table_id)
+                        if success:
+                            return json_response({
+                                "table_id": table_id,
+                                "position": p.get('position', 0),
+                                "table_name": table.name
+                            })
+                else:
+                    # La table n'existe pas, il faut la recréer
+                    logger.warning(f"[REJOIN] Table {table_id} not found, recreating...")
+
+                    from .models import CreateTableRequest
+
+                    table_request = CreateTableRequest(
+                        name=f"{t.name} — Table",
+                        tournament_id=t.id,
+                        max_players=9,
+                    )
+                    new_table = await lobby.create_table(
+                        table_request,
+                        game_variant=GameVariant(t.game_variant) if t.game_variant else GameVariant.HOLDEM,
+                    )
+
+                    # Mettre à jour l'ID de la table dans le tournoi
+                    for i, old_table_id in enumerate(t.tables):
+                        if old_table_id == table_id:
+                            t.tables[i] = new_table.id
+                            break
+
+                    # Ajouter tous les joueurs qui étaient dans cette table
+                    players_to_add = [pl for pl in t.players if pl.get('table_id') == table_id]
+                    for i, player in enumerate(players_to_add):
+                        await lobby.join_table(player['user_id'], new_table.id)
+                        player['table_id'] = new_table.id
+                        player['position'] = i
+
+                    await tournament_manager.save_tournament(t)
+
+                    if user_id not in new_table.players:
+                        await lobby.join_table(user_id, new_table.id)
+
+                    return json_response({
+                        "table_id": new_table.id,
+                        "position": p.get('position', 0),
+                        "table_name": new_table.name,
+                        "recreated": True
+                    })
+            else:
+                # Le joueur n'a pas de table assignée, chercher une table existante
+                for existing_table_id in t.tables:
+                    existing_table = lobby.tables.get(existing_table_id)
+                    if existing_table and len(existing_table.players) < existing_table.max_players:
+                        success = await lobby.join_table(user_id, existing_table_id)
+                        if success:
+                            p['table_id'] = existing_table_id
+                            await tournament_manager.save_tournament(t)
+                            return json_response({
+                                "table_id": existing_table_id,
+                                "position": len(existing_table.players) - 1,
+                                "table_name": existing_table.name
+                            })
+
+                # Créer une nouvelle table si aucune n'est disponible
+                from .models import CreateTableRequest
+                table_request = CreateTableRequest(
+                    name=f"{t.name} — Table",
+                    tournament_id=t.id,
+                    max_players=9,
+                )
+                new_table = await lobby.create_table(
+                    table_request,
+                    game_variant=GameVariant(t.game_variant) if t.game_variant else GameVariant.HOLDEM,
+                )
+                t.tables.append(new_table.id)
+
+                await tournament_manager.save_tournament(t)
+                if user_id not in new_table.players:
+                    await lobby.join_table(user_id, new_table.id)
+                return json_response({
+                    "table_id": new_table.id,
+                    "position": 0,
+                    "table_name": new_table.name,
+                    "created": True
+                })
+
+    raise HTTPException(status_code=404, detail="Player not found in tournament")
 
 # ── Hand History ──────────────────────────────────────────────────────────
 
 @app.get("/api/tables/{table_id}/history")
 async def get_table_history(table_id: str, limit: int = 20, offset: int = 0):
-    """Retourne l'historique des mains d'une table"""
     from .game_engine import HISTORY_DIR
     history_dir = HISTORY_DIR / table_id
     if not history_dir.exists():
@@ -363,7 +687,6 @@ async def get_table_history(table_id: str, limit: int = 20, offset: int = 0):
 
 @app.get("/api/tables/{table_id}/history/{hand_number}")
 async def get_hand_detail(table_id: str, hand_number: int):
-    """Retourne le détail d'une main"""
     from .game_engine import HISTORY_DIR
     path = HISTORY_DIR / table_id / f"hand_{hand_number:06d}.json"
     if not path.exists():
@@ -374,8 +697,81 @@ async def get_hand_detail(table_id: str, hand_number: int):
     except Exception:
         raise HTTPException(status_code=500)
 
-
 # ── Tournament Results ────────────────────────────────────────────────────
+
+@app.post("/api/tournaments/{tid}/force-reconnect")
+async def force_reconnect_tournament(tid: str, _: Dict = Depends(require_admin)):
+    t = tournament_manager.get_tournament(tid)
+    if not t:
+        raise HTTPException(status_code=404)
+
+    players_status = []
+    for p in t.players:
+        if p.get('status') != 'eliminated':
+            table_id = p.get('table_id')
+            table = lobby.tables.get(table_id) if table_id else None
+            in_table = table and p['user_id'] in table.players if table else False
+
+            players_status.append({
+                "user_id": p['user_id'],
+                "username": p['username'],
+                "table_id": table_id,
+                "in_table": in_table,
+                "chips": p.get('chips', 0)
+            })
+
+    return {
+        "success": True,
+        "tournament": t.name,
+        "status": t.status.value if hasattr(t.status, 'value') else str(t.status),
+        "players": players_status,
+        "tables": list(t.tables),
+        "tables_exist": [{"id": tid, "exists": tid in lobby.tables} for tid in t.tables]
+    }
+
+@app.get("/api/tournaments/{tid}/reconnect-status")
+async def tournament_reconnect_status(tid: str, user_id: str):
+    t = tournament_manager.get_tournament(tid)
+    if not t:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    player = None
+    for p in t.players:
+        if p['user_id'] == user_id:
+            player = p
+            break
+
+    if not player:
+        return json_response({
+            "can_reconnect": False,
+            "reason": "not_registered"
+        })
+
+    if t.status not in (TournamentStatus.IN_PROGRESS, TournamentStatus.PAUSED):
+        return json_response({
+            "can_reconnect": False,
+            "reason": "tournament_not_active",
+            "status": t.status
+        })
+
+    if player.get('status') == 'eliminated':
+        return json_response({
+            "can_reconnect": False,
+            "reason": "eliminated"
+        })
+
+    table_id = player.get('table_id')
+    table = lobby.tables.get(table_id) if table_id else None
+
+    return json_response({
+        "can_reconnect": True,
+        "has_table": table is not None,
+        "table_id": table_id,
+        "table_exists": table is not None,
+        "player_in_table": table and user_id in table.players if table else False,
+        "chips": player.get('chips', 0),
+        "status": player.get('status', 'registered')
+    })
 
 @app.get("/tournament/{tid}/results", response_class=HTMLResponse)
 async def tournament_results_page(tid: str):
@@ -428,7 +824,7 @@ async def admin_update_tournament(tid: str, request: UpdateTournamentRequest, _:
         val = getattr(request, field, None)
         if val is not None:
             setattr(t, field, val)
-    tournament_manager.save_tournament(t)
+    await tournament_manager.save_tournament(t)  # <-- AJOUT await
     return json_response({"success": True})
 
 @app.delete("/api/admin/tournaments/{tid}")
@@ -442,7 +838,7 @@ async def admin_pause_tournament(tid: str, _: Dict = Depends(require_admin)):
     if not t:
         raise HTTPException(status_code=404)
     t.pause()
-    tournament_manager.save_tournament(t)
+    await tournament_manager.save_tournament(t)  # <-- AJOUT await
     return json_response({"success": True, "status": t.status})
 
 @app.post("/api/admin/tournaments/{tid}/resume")
@@ -451,7 +847,7 @@ async def admin_resume_tournament(tid: str, _: Dict = Depends(require_admin)):
     if not t:
         raise HTTPException(status_code=404)
     t.resume()
-    tournament_manager.save_tournament(t)
+    await tournament_manager.save_tournament(t)  # <-- AJOUT await
     return json_response({"success": True, "status": t.status})
 
 @app.post("/api/admin/tournaments/{tid}/mute")
@@ -460,7 +856,7 @@ async def admin_mute_player(tid: str, request: AdminActionRequest, _: Dict = Dep
     if not t or not request.user_id:
         raise HTTPException(status_code=404)
     t.mute_player(request.user_id)
-    tournament_manager.save_tournament(t)
+    await tournament_manager.save_tournament(t)  # <-- AJOUT await
     return json_response({"success": True})
 
 @app.post("/api/admin/tournaments/{tid}/unmute")
@@ -469,7 +865,7 @@ async def admin_unmute_player(tid: str, request: AdminActionRequest, _: Dict = D
     if not t or not request.user_id:
         raise HTTPException(status_code=404)
     t.unmute_player(request.user_id)
-    tournament_manager.save_tournament(t)
+    await tournament_manager.save_tournament(t)  # <-- AJOUT await
     return json_response({"success": True})
 
 @app.post("/api/admin/tournaments/{tid}/exclude")
@@ -478,7 +874,7 @@ async def admin_exclude_player(tid: str, request: AdminActionRequest, _: Dict = 
     if not t or not request.user_id:
         raise HTTPException(status_code=404)
     t.exclude_player(request.user_id, request.reason or "Admin decision")
-    tournament_manager.save_tournament(t)
+    await tournament_manager.save_tournament(t)  # <-- AJOUT await
     return json_response({"success": True})
 
 @app.get("/api/admin/stats")
@@ -556,6 +952,28 @@ async def chat_websocket(websocket: WebSocket):
 # WEBSOCKET — Table
 # ══════════════════════════════════════════════════════════════════════════════
 
+@app.get("/api/tables/{table_id}/players")
+async def get_table_players(table_id: str):
+    table = lobby.tables.get(table_id)
+    if not table:
+        raise HTTPException(status_code=404)
+    return {
+        "table_id": table.id,
+        "table_name": table.name,
+        "players": [
+            {
+                "user_id": p.user_id,
+                "username": p.username,
+                "chips": p.chips,
+                "position": p.position,
+                "status": p.status.value if hasattr(p.status, 'value') else str(p.status)
+            }
+            for p in table.players.values()
+        ],
+        "player_count": len(table.players),
+        "spectators": list(table.spectators)
+    }
+
 @app.websocket("/ws/{table_id}/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, table_id: str, user_id: str):
     await websocket.accept()
@@ -566,85 +984,227 @@ async def websocket_endpoint(websocket: WebSocket, table_id: str, user_id: str):
         await websocket.close()
         return
 
+    table = lobby.tables.get(table_id)
+    if not table:
+        await websocket.send_json({"type": "error", "message": "Table not found"})
+        await websocket.close()
+        return
+
     is_spectator = False
-    if user_id != 'spectator' and not user_id.startswith('spectator_'):
-        validated_uid, force_spectator = authenticate_websocket(websocket, user_id)
-        user_id = validated_uid
-        is_spectator = force_spectator
+    real_user_id = user_id
+
+    session_id = websocket.cookies.get('poker_session') if websocket.cookies else None
+    if session_id:
+        validated_user_id = auth_manager.validate_session(session_id)
+        if validated_user_id:
+            real_user_id = validated_user_id
+            if validated_user_id != user_id:
+                logger.info(f"WS auth: using authenticated user {validated_user_id} instead of {user_id}")
+        else:
+            logger.warning(f"WS auth: invalid session for {user_id}")
+            is_spectator = True
     else:
         is_spectator = True
-
-    if user_id == 'spectator':
-        user_id = f"spectator_{uuid.uuid4().hex[:8]}"
+        real_user_id = f"spectator_{uuid.uuid4().hex[:8]}"
 
     table = lobby.tables.get(table_id)
-    if not is_spectator and table and user_id not in table.players:
+    if not table:
+        await websocket.send_json({"type": "error", "message": "Table no longer exists"})
+        await websocket.close()
+        return
+
+    if not is_spectator and real_user_id not in table.players:
+        logger.info(f"User {real_user_id} not in table {table_id}, switching to spectator")
         is_spectator = True
 
-    await ws_manager.connect(websocket, table_id, user_id)
+    logger.info(f"WS connection: user={real_user_id}, table={table_id}, is_spectator={is_spectator}")
+
+    await ws_manager.connect(websocket, table_id, real_user_id)
     if table and not table._ws_manager:
         table.set_ws_manager(ws_manager)
 
-    # Envoyer état initial
-    if table:
-        try:
-            state = table.get_state(for_user_id=user_id if not is_spectator else None)
-            if is_spectator and isinstance(state, dict):
-                state = copy.deepcopy(state)
-                for p in state.get('players', []):
-                    p['hole_cards'] = []
-            await websocket.send_json({
-                "type": "game_state", "data": state, "is_spectator": is_spectator,
-            })
-        except Exception as e:
-            logger.error(f"Initial state error: {e}")
+    try:
+        state = table.get_state(for_user_id=real_user_id if not is_spectator else None)
+        if is_spectator and isinstance(state, dict):
+            import copy
+            state = copy.deepcopy(state)
+            for p in state.get('players', []):
+                p['hole_cards'] = []
+        await websocket.send_json({
+            "type": "game_state",
+            "data": state,
+            "is_spectator": is_spectator,
+            "user_id": real_user_id
+        })
+    except Exception as e:
+        logger.error(f"Initial state error: {e}")
 
     try:
         while True:
             data = await websocket.receive_json()
-            mt = data.get("type", "")
+            msg_type = data.get('type')
 
-            if mt == "action" and not is_spectator and table:
+            table = lobby.tables.get(table_id)
+            if not table:
+                await websocket.send_json({"type": "error", "message": "Table no longer exists"})
+                await websocket.close()
+                break
+
+            if msg_type == 'action':
+                action_str = data.get('action')
+                amount = data.get('amount', 0)
                 try:
-                    action = ActionType(data.get("action"))
-                    amount = data.get("amount", 0)
-                    await table.handle_player_action(user_id, action, amount)
+                    action = ActionType(action_str)
+                    await table.handle_player_action(real_user_id, action, amount)
+                except ValueError:
+                    logger.warning(f"Invalid action: {action_str}")
                 except Exception as e:
                     logger.error(f"Action error: {e}")
-                    await websocket.send_json({"type": "error", "message": str(e)})
 
-            elif mt == "chat":
-                # Vérifier si muted dans un tournoi
-                if table and table.tournament_id:
-                    t = tournament_manager.get_tournament(table.tournament_id)
-                    if t and t.is_muted(user_id):
-                        await websocket.send_json({"type": "error", "message": "Vous êtes muté"})
-                        continue
+            elif msg_type == 'chat':
+                message = data.get('message', '').strip()
+                if message and not is_spectator:
+                    muted = False
+                    if table.tournament_id and tournament_manager:
+                        t = tournament_manager.get_tournament(table.tournament_id)
+                        if t and t.is_muted(real_user_id):
+                            muted = True
+                    if not muted:
+                        await ws_manager.broadcast_to_table(table_id, {
+                            'type': 'table_chat',
+                            'user_id': real_user_id,
+                            'username': data.get('username', '?'),
+                            'message': message,
+                        })
 
-                un = "Spectator"
-                if user_id in lobby.users:
-                    un = lobby.users[user_id].username
-                else:
-                    ud = auth_manager.get_user_by_id(user_id)
-                    if ud:
-                        un = ud.get('username', user_id)
-
-                msg_text = sanitize_chat_message(data.get("message", ""))
-                if msg_text:
-                    await ws_manager.broadcast_to_table(table_id, {
-                        "type": "table_chat", "user_id": user_id,
-                        "username": un, "message": msg_text,
-                    })
-
-            elif mt == "ping":
-                await websocket.send_json({"type": "pong"})
-
-            elif mt == "pong":
-                ws_manager.handle_pong(table_id, user_id)
+            elif msg_type == 'ping':
+                await websocket.send_json({'type': 'pong'})
 
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        logger.error(f"WS error {user_id}@{table_id}: {e}")
+        logger.error(f"WebSocket error: {e}")
     finally:
-        await ws_manager.disconnect(websocket, table_id, user_id)
+        await ws_manager.disconnect(websocket, table_id, real_user_id)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MONITOR STATUS (admin)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ===== ADMIN ACTIONS AVANCÉES =====
+
+# Variable globale pour le mode maintenance (ajouter en début de fichier)
+maintenance_mode = False
+
+@app.post("/api/admin/maintenance/toggle")
+async def toggle_maintenance(_: Dict = Depends(require_admin)):
+    """Active ou désactive le mode maintenance global."""
+    global maintenance_mode
+    maintenance_mode = not maintenance_mode
+    return json_response({"success": True, "maintenance": maintenance_mode})
+
+@app.get("/api/admin/connected-users")
+async def get_connected_users(_: Dict = Depends(require_admin)):
+    """Liste tous les utilisateurs connectés via WebSocket."""
+    users = set()
+    if ws_manager:
+        for table_conns in ws_manager._connections.values():
+            for uid in table_conns.keys():
+                users.add(uid)
+    return json_response({"users": list(users)})
+
+@app.post("/api/admin/restart-tables")
+async def admin_restart_tables(_: Dict = Depends(require_admin)):
+    """Redémarre toutes les tables actives (relance les game loops)."""
+    restarted = 0
+    for table_id, table in lobby.tables.items():
+        # Compter les joueurs actifs
+        active_players = [p for p in table.players.values() if p.chips > 0 and p.status != PlayerStatus.ELIMINATED]
+        if len(active_players) < 2:
+            continue
+
+        # Annuler la tâche existante si elle tourne
+        if table._game_task:
+            old_task = table._game_task
+            table._game_task = None
+            old_task.cancel()
+            try:
+                await old_task
+            except asyncio.CancelledError:
+                pass
+            await asyncio.sleep(0.5)  # laisser le temps à la main de se terminer proprement
+
+        # Démarrer une nouvelle boucle
+        table._game_task = asyncio.create_task(table._game_loop())
+        restarted += 1
+    return json_response({"success": True, "restarted_tables": restarted})
+
+@app.post("/api/admin/rate-limit")
+async def set_rate_limit(request: Request, _: Dict = Depends(require_admin)):
+    """Modifie dynamiquement les limites de taux."""
+    data = await request.json()
+    max_requests = data.get('max_requests')
+    window_seconds = data.get('window_seconds')
+    if max_requests is None or window_seconds is None:
+        raise HTTPException(status_code=400, detail="Missing parameters")
+    from .security import login_limiter, register_limiter, ws_connect_limiter
+    login_limiter.max_requests = max_requests
+    login_limiter.window = window_seconds
+    register_limiter.max_requests = max_requests
+    register_limiter.window = window_seconds
+    ws_connect_limiter.max_requests = max_requests
+    ws_connect_limiter.window = window_seconds
+    return json_response({"success": True})
+
+# ===== PROFIL UTILISATEUR (non-admin) =====
+
+@app.post("/api/profile/email")
+async def update_email(request: Request, current_user: Dict = Depends(get_current_user)):
+    data = await request.json()
+    email = data.get('email')
+    if not email or '@' not in email:
+        raise HTTPException(status_code=400, detail="Invalid email")
+    auth_manager.update_user(current_user['id'], email=email)
+    return json_response({"success": True})
+
+@app.post("/api/profile/password")
+async def change_password(request: Request, current_user: Dict = Depends(get_current_user)):
+    data = await request.json()
+    old_password = data.get('current_password')
+    new_password = data.get('new_password')
+    if not old_password or not new_password:
+        raise HTTPException(status_code=400, detail="Both passwords required")
+
+    # Récupérer l'utilisateur et son hash
+    user = auth_manager.get_user_by_id(current_user['id'])
+    # Note : auth_manager ne stocke pas le hash dans l'objet retourné, il faut lire depuis le XML
+    # On va ajouter une méthode interne dans auth_manager pour vérifier le mot de passe
+    if not auth_manager.verify_password(current_user['id'], old_password):
+        raise HTTPException(status_code=401, detail="Invalid current password")
+
+    # Mettre à jour le hash
+    new_hash = auth_manager._hash_password(new_password)
+    auth_manager.update_user(current_user['id'], password_hash=new_hash)
+    return json_response({"success": True})
+
+
+@app.get("/api/admin/monitor-status")
+async def monitor_status(_: Dict = Depends(require_admin)):
+    return {
+        "monitor_running": tournament_manager._monitor_task is not None,
+        "monitor_task_done": tournament_manager._monitor_task.done() if tournament_manager._monitor_task else None,
+        "save_task_running": tournament_manager._save_task is not None,
+        "tournaments_count": len(tournament_manager.tournaments),
+        "tournaments_status": [
+            {
+                "id": t.id,
+                "name": t.name,
+                "status": t.status.value if hasattr(t.status, 'value') else str(t.status),
+                "players": len(t.get_registered_players()),
+                "start_time": t.start_time.isoformat(),
+                "can_start": t.status == "registration" and datetime.utcnow() >= t.start_time and len(t.get_registered_players()) >= t.min_players_to_start
+            }
+            for t in tournament_manager.list_tournaments()
+        ]
+    }

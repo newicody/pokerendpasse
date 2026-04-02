@@ -1,6 +1,7 @@
 # backend/auth.py
 import bcrypt
 import secrets
+import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -18,6 +19,22 @@ class AuthManager:
         self.sessions_dir = self.data_dir / "sessions"
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_users_file()
+
+
+    def xml_safe_encode(self, text: str) -> str:
+        """Encodage XML sécurisé - méthode d'instance"""
+        if text is None:
+            return ''
+        text = str(text)
+        # Remplacer les caractères dangereux
+        text = text.replace('&', '&amp;')
+        text = text.replace('<', '&lt;')
+        text = text.replace('>', '&gt;')
+        text = text.replace('"', '&quot;')
+        text = text.replace("'", '&apos;')
+        # Supprimer les caractères de contrôle
+        text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
+        return text
 
     def _ensure_users_file(self):
         self.users_file.parent.mkdir(parents=True, exist_ok=True)
@@ -42,6 +59,7 @@ class AuthManager:
 
     def _hash_password(self, password: str) -> str:
         return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
 
     def _verify_password(self, password: str, hashed: str) -> bool:
         try:

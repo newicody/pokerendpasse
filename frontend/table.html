@@ -8,6 +8,15 @@
     <link rel="stylesheet" href="/css/table.css">
 </head>
 <body>
+<div class="table-header">
+    <button id="backToLobbyBtn" class="btn-small lobby-back-btn">← Lobby</button>
+    <div id="tableName" class="table-name">{{ table_name }}</div>
+    <div id="spectatorModeIndicator" class="spectator-indicator" style="display:none">
+        👁️ Mode Spectateur
+    </div>
+    <span id="localTime" class="local-time"></span>
+    <button id="tableOptionsBtn" class="btn-small">⚙️ Options</button>
+</div>
 
 <!-- Barre info tournoi -->
 <div id="tournamentInfo" class="tournament-info-bar"></div>
@@ -19,15 +28,12 @@
 </div>
 
 <div class="poker-room">
-
-    <!-- ════════ ZONE TABLE ════════ -->
     <div class="table-area">
         <div class="table-wrapper">
             <div class="poker-table" id="pokerTable">
                 <div class="players-container" id="playersContainer"></div>
                 <div class="center-area">
-                    <!-- Deck widget SRA -->
-                    <div class="deck-widget" id="deckWidget">
+                    <div class="deck-widget">
                         <div class="deck-stack">
                             <div class="deck-card dc-3"></div>
                             <div class="deck-card dc-2"></div>
@@ -37,34 +43,27 @@
                             <span id="deckStatus" class="deck-status">🔒</span>
                         </div>
                     </div>
-                    <!-- Community cards -->
                     <div class="community-cards" id="communityCards"></div>
-                    <!-- Pot -->
                     <div class="pot-display" id="potDisplay">Pot: 0</div>
                 </div>
             </div>
         </div>
 
-        <!-- ════════ ACTIONS ════════ -->
         <div class="action-bar" id="actionBar">
-            <!-- Quick Bets -->
             <div class="quick-bets" id="quickBets" style="display:none">
                 <button class="qb-btn" data-key="1bb">1 BB</button>
                 <button class="qb-btn" data-key="2bb">2 BB</button>
                 <button class="qb-btn" data-key="1_3pot">1/3</button>
                 <button class="qb-btn" data-key="1_2pot">1/2</button>
                 <button class="qb-btn" data-key="3_4pot">3/4</button>
-                <button class="qb-btn" data-key="pot">Pot</button>
                 <button class="qb-btn qb-allin" data-key="allin">All-in</button>
             </div>
-
             <div class="main-actions">
                 <button id="foldBtn" class="action-btn fold" disabled>Fold (F)</button>
                 <button id="checkBtn" class="action-btn check" disabled>Check (C)</button>
                 <button id="callBtn" class="action-btn call" style="display:none" disabled>Call (C)</button>
                 <button id="raiseBtn" class="action-btn raise" disabled>Raise (R)</button>
             </div>
-
             <div class="raise-slider" id="raiseSlider" style="display:none">
                 <input type="range" id="raiseAmount" min="10" max="1000" step="10" value="100">
                 <div class="raise-controls">
@@ -73,7 +72,6 @@
                     <button id="cancelRaise" class="btn-small cancel">Annuler</button>
                 </div>
             </div>
-
             <div class="player-info">
                 <div id="actionTimer" class="action-timer-display">En attente…</div>
                 <div id="playerChips">0 chips</div>
@@ -82,9 +80,7 @@
         </div>
     </div>
 
-    <!-- ════════ PANNEAU DROIT ════════ -->
     <div class="right-panel">
-        <!-- Infos de jeu -->
         <div class="game-info-panel">
             <div class="gi-title">📊 Infos</div>
             <div class="info-row"><span class="label">Main</span><span id="handNumber" class="value">#0</span></div>
@@ -93,18 +89,17 @@
             <div class="info-row"><span class="label">Blinds</span><span id="gameBlinds" class="value">—/—</span></div>
             <div class="info-row"><span class="label">Joueurs</span><span id="playersAlive" class="value">0</span></div>
             <div class="info-row"><span class="label">Mes chips</span><span id="myChipsInfo" class="value">—</span></div>
+            <div class="info-row"><span class="label">Prize pool</span><span id="prizePoolInfo" class="value">—</span></div>
+            <div class="info-row"><span class="label">ITM</span><span id="itmInfo" class="value">—</span></div>
         </div>
 
-        <!-- Options rapides -->
         <div class="quick-options">
             <label class="toggle-label">
                 <input type="checkbox" id="stackDisplayToggle">
                 <span>Afficher en BB</span>
             </label>
-            <button id="themeToggleBtn" class="btn-small">🎨 Thème</button>
         </div>
 
-        <!-- Historique -->
         <div class="hand-history-panel">
             <div class="gi-title">📋 Historique</div>
             <div class="history-list" id="historyList">
@@ -112,75 +107,156 @@
             </div>
         </div>
 
-        <!-- Chat -->
         <div class="table-chat">
-            <div class="gi-title">💬 Chat</div>
+            <div class="gi-title">
+                💬 Chat
+                <button id="chatSettingsBtn" class="btn-small" style="float:right">⚙️</button>
+            </div>
             <div class="tchat-messages" id="tableChatMessages">
                 <div class="tchat-msg tchat-system"><i>Chat actif</i></div>
             </div>
             <div class="tchat-input">
+                <button id="chatSmileyBtn" class="smiley-btn">😊</button>
+                <div id="chatSmileyDropdown" class="smiley-dropdown"></div>
                 <input type="text" id="tableChatInput" placeholder="Message…" disabled maxlength="200">
                 <button id="tableChatSend" disabled>→</button>
             </div>
         </div>
     </div>
-
 </div>
 
 <!-- My cards overlay -->
 <div id="myCardsContainer" class="my-cards-container hidden"></div>
 
-<!-- Toast -->
-<div id="toast" class="toast"></div>
-
-<!-- Theme picker modal -->
-<div id="themeModal" class="modal" style="display:none">
-    <div class="modal-content">
+<!-- Options Modal (unified) -->
+<div id="optionsModal" class="modal" style="display:none">
+    <div class="modal-content" style="max-width: 800px; max-height: 80vh; overflow-y: auto;">
         <span class="close">&times;</span>
-        <h2>🎨 Personnalisation</h2>
-        <div class="form-group">
-            <label>Thème :</label>
-            <select id="themeSelect">
-                <option value="dark">Sombre (défaut)</option>
-                <option value="light">Clair</option>
-                <option value="neon">Néon</option>
-                <option value="blue">Bleu</option>
-                <option value="red">Rouge</option>
-            </select>
+        <h2>⚙️ Options</h2>
+        <div class="options-tabs">
+            <button class="options-tab active" data-tab="profile">👤 Profil</button>
+            <button class="options-tab" data-tab="game">🎮 Jeu</button>
+            <button class="options-tab" data-tab="sound">🔊 Son</button>
+            <button class="options-tab" data-tab="chat">💬 Chat</button>
+            <button class="options-tab" data-tab="network">🌐 Réseau</button>
+            <button class="options-tab" data-tab="history">📜 Historique</button>
+            <button class="options-tab" id="adminTab" data-tab="admin" style="display:none">🔧 Admin</button>
         </div>
-        <div class="form-group">
-            <label>Jeu de cartes :</label>
-            <select id="cardDeckSelect">
-                <option value="standard">Standard</option>
-                <option value="fourcolor">4 couleurs</option>
-                <option value="classic">Classique</option>
-                <option value="minimal">Minimal</option>
-            </select>
+
+        <!-- Onglet Profil -->
+        <div id="profileTab" class="options-tab-content active">
+            <div style="text-align:center;margin-bottom:16px">
+                <img id="profileAvatar" src="/assets/avatars/default.svg" style="width:80px;height:80px;border-radius:50%;border:3px solid var(--accent);object-fit:cover">
+            </div>
+            <div class="form-group">
+                <label>Pseudo :</label>
+                <input type="text" id="profileUsername" readonly style="background:#333; color:#aaa;">
+            </div>
+            <div class="form-group">
+                <label>Email :</label>
+                <input type="email" id="profileEmail">
+                <button id="updateEmailBtn" class="btn-small" style="margin-top:4px">Mettre à jour</button>
+            </div>
+            <div class="form-group">
+                <label>Changer d'avatar :</label>
+                <input type="file" id="avatarUpload" accept="image/jpeg,image/png,image/gif,image/webp">
+                <small style="color:var(--text-muted)">Max 2 Mo — JPG, PNG, GIF, WebP</small>
+                <button id="uploadAvatarBtn" class="btn-primary" style="margin-top:8px">Sauvegarder l'avatar</button>
+            </div>
+            <div id="uploadStatus" style="margin-top:8px"></div>
+            <hr style="margin:20px 0">
+            <div class="form-group">
+                <label>Changer le mot de passe :</label>
+                <input type="password" id="oldPassword" placeholder="Ancien mot de passe">
+                <input type="password" id="newPassword" placeholder="Nouveau mot de passe">
+                <button id="changePasswordBtn" class="btn-small" style="margin-top:4px">Changer</button>
+            </div>
         </div>
-        <div class="form-group">
-            <label>Table :</label>
-            <select id="tableStyleSelect">
-                <option value="felt">Feutre vert</option>
-                <option value="blue-felt">Feutre bleu</option>
-                <option value="wood">Bois</option>
-                <option value="dark">Sombre</option>
-            </select>
+
+        <!-- Onglet Jeu -->
+        <div id="gameTab" class="options-tab-content">
+            <h3>🎨 Apparence</h3>
+            <div class="form-group"><label>Thème :</label><select id="themeSelect"><option value="dark">Sombre</option><option value="light">Clair</option><option value="neon">Néon</option><option value="blue">Bleu</option><option value="red">Rouge</option></select></div>
+            <div class="form-group"><label>Jeu de cartes :</label><select id="cardDeckSelect"><option value="standard">Standard</option><option value="fourcolor">4 couleurs</option><option value="classic">Classique</option><option value="minimal">Minimal</option></select></div>
+            <div class="form-group"><label>Style de table :</label><select id="tableStyleSelect"><option value="felt">Feutre vert</option><option value="blue-felt">Feutre bleu</option><option value="wood">Bois</option><option value="dark">Sombre</option></select></div>
+
+            <h3>🎮 Comportement</h3>
+            <div class="form-group"><label>Vitesse animation :</label><select id="animationSpeed"><option value="fast">Rapide</option><option value="normal">Normal</option><option value="slow">Lent</option></select></div>
+            <div class="form-group"><label>Action auto :</label><select id="autoAction"><option value="never">Jamais</option><option value="check_fold">Check/Fold</option></select></div>
+            <div class="form-group"><label>Timer d'action (secondes) :</label><input type="number" id="actionTimer" min="10" max="60" step="5"></div>
+            <div class="form-group"><label class="toggle-label"><input type="checkbox" id="showStacksInBB"> Afficher les stacks en BB</label></div>
+            <div class="form-group"><label class="toggle-label"><input type="checkbox" id="autoRebuy"> Rebuy automatique (tournois)</label></div>
+            <div class="form-group"><label>Nombre de tables simultanées :</label><input type="number" id="maxTables" min="1" max="10" step="1"></div>
         </div>
-        <button id="applyTheme" class="btn-primary">Appliquer</button>
+
+        <!-- Onglet Son -->
+        <div id="soundTab" class="options-tab-content">
+            <div class="form-group"><label>Son :</label><select id="soundSetting"><option value="on">Activé</option><option value="off">Désactivé</option></select></div>
+            <div class="form-group"><label>Volume général :</label><input type="range" id="soundVolume" min="0" max="1" step="0.01"></div>
+            <div class="form-group"><label class="toggle-label"><input type="checkbox" id="soundOnWin"> Son spécial victoire</label></div>
+            <div class="form-group"><label class="toggle-label"><input type="checkbox" id="soundOnChat"> Notification sonore pour chat</label></div>
+            <div class="form-group"><label class="toggle-label"><input type="checkbox" id="soundOnDeal"> Son distribution cartes</label></div>
+            <div class="form-group"><label class="toggle-label"><input type="checkbox" id="soundOnTimer"> Son timer (5 secondes)</label></div>
+            <div class="form-group"><label>Personnalisation (URL fichier MP3) :</label><input type="text" id="customSoundUrl" placeholder="https://..."></div>
+        </div>
+
+        <!-- Onglet Chat -->
+        <div id="chatTab" class="options-tab-content">
+            <div class="form-group"><label class="toggle-label"><input type="checkbox" id="chatTimestamps"> Afficher l'heure des messages</label></div>
+            <div class="form-group"><label>Taille des messages :</label><select id="chatFontSize"><option value="small">Petite</option><option value="medium" selected>Moyenne</option><option value="large">Grande</option></select></div>
+            <div class="form-group"><label class="toggle-label"><input type="checkbox" id="chatNotifications"> Notifications sonores (si activé ci-dessus)</label></div>
+            <div class="form-group"><label>Ignorer les joueurs (IDs séparés par virgules) :</label><input type="text" id="chatIgnoreList" placeholder="user1,user2"></div>
+            <div class="form-group"><label>Smileys personnalisés (JSON) :</label><textarea id="customSmileys" rows="2" placeholder='{"😎":"cool","😂":"laugh"}'></textarea></div>
+        </div>
+
+        <!-- Onglet Réseau -->
+        <div id="networkTab" class="options-tab-content">
+            <div class="form-group"><label>Qualité WebSocket :</label><select id="networkQuality"><option value="auto">Auto</option><option value="low">Faible (moins de trafic)</option><option value="high">Élevé (plus réactif)</option></select></div>
+            <div class="form-group"><label class="toggle-label"><input type="checkbox" id="reconnectOnDrop"> Reconnexion automatique</label></div>
+            <div class="form-group"><label>Délai de reconnexion (secondes) :</label><input type="number" id="reconnectDelay" min="1" max="30" step="1"></div>
+            <div class="form-group"><label class="toggle-label"><input type="checkbox" id="compressionData"> Compression des données (expérimental)</label></div>
+        </div>
+
+        <!-- Onglet Historique -->
+        <div id="historyTab" class="options-tab-content">
+            <div class="form-group"><label>Afficher historique :</label><select id="showHistory"><option value="all">Toutes les mains</option><option value="mine">Mes mains seulement</option><option value="none">Masqué</option></select></div>
+            <div class="form-group"><label>Nombre de mains dans l'historique :</label><input type="number" id="historyMaxEntries" min="5" max="100" step="5"></div>
+            <div class="form-group"><button id="exportHistoryBtn" class="btn-small">Exporter l'historique (JSON)</button></div>
+            <div class="form-group"><button id="clearHistoryBtn" class="btn-small">Effacer l'historique local</button></div>
+            <div class="form-group"><label class="toggle-label"><input type="checkbox" id="autoSaveHistory"> Sauvegarde automatique après chaque main</label></div>
+        </div>
+
+        <!-- Onglet Admin -->
+        <div id="adminTabContent" class="options-tab-content">
+            <div class="form-group"><label>Thème admin :</label><select id="adminThemeSelect"><option value="dark">Sombre</option><option value="light">Clair</option><option value="neon">Néon</option><option value="blue">Bleu</option><option value="red">Rouge</option></select></div>
+            <button id="saveAdminTheme" class="btn-primary">Appliquer thème</button>
+            <hr style="margin:20px 0">
+            <div class="form-group"><label>Mode maintenance :</label><button id="toggleMaintenanceBtn" class="btn-small">Basculer</button></div>
+            <div class="form-group"><label>Redémarrer toutes les tables :</label><button id="restartAllTablesBtn" class="btn-small">Redémarrer</button></div>
+            <div class="form-group"><label>Vider le cache utilisateur :</label><button id="clearUserCacheBtn" class="btn-small">Vider</button></div>
+            <div class="form-group"><label>Liste des joueurs connectés :</label><button id="listConnectedBtn" class="btn-small">Afficher</button></div>
+            <div class="form-group"><label>Configurer les limites de taux :</label><input type="text" id="rateLimitConfig" placeholder="max_requests:30, window:60"><button id="applyRateLimitBtn" class="btn-small">Appliquer</button></div>
+        </div>
+
+        <div style="margin-top: 20px; text-align: right;">
+            <button id="saveSettings" class="btn-primary">Sauvegarder toutes les options</button>
+        </div>
     </div>
 </div>
 
+<div id="toastContainer" class="toast-container"></div>
+
 <script src="/js/settings_manager.js"></script>
-<script src="/js/sound_manager.js"></script>
 <script src="/js/theme_manager.js"></script>
 <script src="/js/cards.js"></script>
+<script src="/js/sound_manager.js"></script>
 <script src="/js/timer.js"></script>
 <script src="/js/hand_history.js"></script>
+<script src="/js/table.js"></script>
+
 <script>
     window.tableId = "{{ table_id }}";
     window.tableName = "{{ table_name }}";
 </script>
-<script src="/js/table.js"></script>
-
 </body>
 </html>

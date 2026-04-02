@@ -24,10 +24,19 @@
         .feature h3 { color: var(--accent); margin-bottom: 6px; }
         .feature p { font-size: 14px; color: var(--text-muted); }
         .btn-large { font-size: 20px; padding: 16px 40px; }
+        .theme-picker {
+            position: fixed; top: 20px; right: 20px;
+            background: var(--bg-secondary); border-radius: 8px;
+            padding: 6px 12px; font-size: 12px; cursor: pointer;
+            border: 1px solid var(--border-subtle);
+            z-index: 100;
+        }
+        .theme-picker:hover { background: var(--bg-tertiary); }
     </style>
 </head>
 <body>
     <div class="landing">
+        <div class="theme-picker" id="themePicker">🎨 Thème</div>
         <h1>♠ PokerEndPasse ♥</h1>
         <p>Tournois Freeroll — Texas Hold'em &amp; PLO — Jusqu'à 100 joueurs</p>
         <a href="/lobby" class="btn-primary btn-large">Entrer dans le Lobby</a>
@@ -38,5 +47,33 @@
             <div class="feature"><h3>🎨 Personnalisable</h3><p>Thèmes, jeux de cartes, tables et avatars</p></div>
         </div>
     </div>
+
+    <script src="/js/settings_manager.js"></script>
+    <script src="/js/theme_manager.js"></script>
+    <script>
+        // Appliquer le thème sauvegardé
+        if (typeof SettingsManager !== 'undefined') {
+            SettingsManager.load();
+            const theme = SettingsManager.get('theme') || 'dark';
+            if (typeof ThemeManager !== 'undefined') {
+                ThemeManager.setTheme(theme);
+            }
+        }
+
+        // Sélecteur de thème rapide
+        const picker = document.getElementById('themePicker');
+        if (picker && typeof ThemeManager !== 'undefined') {
+            picker.addEventListener('click', () => {
+                const themes = ThemeManager.getAvailable();
+                const current = ThemeManager.getTheme();
+                const nextIndex = (themes.indexOf(current) + 1) % themes.length;
+                const nextTheme = themes[nextIndex];
+                ThemeManager.setTheme(nextTheme);
+                if (typeof SettingsManager !== 'undefined') {
+                    SettingsManager.set('theme', nextTheme);
+                }
+            });
+        }
+    </script>
 </body>
 </html>

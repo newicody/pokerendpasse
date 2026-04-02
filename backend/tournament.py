@@ -2,7 +2,7 @@
 """
 Tournament Manager — PokerEndPasse
 ====================================
-Version consolidée :
+Version consolidée avec corrections :
 - Monitor résilient avec démarrage différé (pas dans __init__)
 - Pause / Resume de tournoi
 - Exclusion de joueurs
@@ -10,6 +10,8 @@ Version consolidée :
 - Blind clock avec level up automatique
 - Rééquilibrage des tables
 - Persistance XML
+- Sauvegarde asynchrone avec queue
+- Correction de la synchronisation des chips
 """
 
 import asyncio
@@ -21,7 +23,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
-from .models import TournamentStatus, GameVariant, PlayerStatus
+from .models import TournamentStatus, GameVariant, PlayerStatus, TableStatus
 
 logger = logging.getLogger(__name__)
 
@@ -195,14 +197,6 @@ class Tournament:
                 break
 
     # ── Sit-out / Disconnect ──────────────────────────────────────────────────
-
-    def on_player_disconnect(self, user_id: str):
-        self._disconnect_times[user_id] = datetime.utcnow()
-        self._sit_out[user_id] = datetime.utcnow()
-
-    def on_player_reconnect(self, user_id: str):
-        self._disconnect_times.pop(user_id, None)
-        self._sit_out.pop(user_id, None)
 
     def is_sit_out(self, user_id: str) -> bool:
         return user_id in self._sit_out
@@ -409,6 +403,8 @@ class TournamentManager:
     """
 
     def __init__(self, data_dir: str = "data", lobby=None):
+        self._disconnect_times: Dict[str, datetime] = {}
+        self._sit_out: Dict[str, datetime] = {}
         self.data_dir = Path(data_dir)
         self.tournaments_dir = self.data_dir / "tournaments"
         self.tournaments_dir.mkdir(parents=True, exist_ok=True)
@@ -417,6 +413,17 @@ class TournamentManager:
         self._ws_manager = None
         self._monitor_task: Optional[asyncio.Task] = None
         self._starting: Set[str] = set()
+        self._starting_lock = asyncio.Lock()
+
+        # Cache pour éviter de recharger constamment
+        self._tournament_cache: Dict[str, dict] = {}
+        self._cache_ttl = 60  # 60 secondes
+
+        # File d'attente pour les sauvegardes
+        self._save_queue = asyncio.Queue()
+        self._save_queue_lock = asyncio.Lock()  # Pour synchroniser si nécessaire
+        self._save_task: Optional[asyncio.Task] = None
+
         self._load_tournaments()
 
     def set_ws_manager(self, ws_manager):
@@ -441,10 +448,30 @@ class TournamentManager:
             except Exception as e:
                 logger.error(f"Load tournament {f}: {e}")
 
-    def save_tournament(self, t: Tournament):
+    async def save_tournament(self, t: Tournament):
+        """Sauvegarde asynchrone (mise en queue)"""
+        # Mettre à jour les chips des joueurs depuis les tables
+        if self.lobby:
+            for player in t.players:
+                table_id = player.get('table_id')
+                if table_id:
+                    table = self.lobby.tables.get(table_id)
+                    if table and player['user_id'] in table.players:
+                        # Mettre à jour les chips depuis la table
+                        player['chips'] = table.players[player['user_id']].chips
+                        player['status'] = table.players[player['user_id']].status.value if hasattr(table.players[player['user_id']].status, 'value') else str(table.players[player['user_id']].status)
+        await self._save_queue.put(t)
+
+    def _save_tournament_sync(self, t: Tournament):
+        """Sauvegarde synchrone (appelée par le worker)"""
         try:
             tree = ET.ElementTree(t.to_xml())
             tree.write(self.tournaments_dir / f"{t.id}.xml", encoding='utf-8', xml_declaration=True)
+            # Mettre à jour le cache
+            self._tournament_cache[t.id] = {
+                'data': t,
+                'timestamp': datetime.utcnow()
+            }
         except Exception as e:
             logger.error(f"Save tournament {t.id}: {e}")
 
@@ -462,7 +489,7 @@ class TournamentManager:
         tid = str(uuid.uuid4())
         t = Tournament(tournament_id=tid, **kwargs)
         self.tournaments[tid] = t
-        self.save_tournament(t)
+        asyncio.create_task(self.save_tournament(t))
         logger.info(f"Tournament created: {t.name} ({tid})")
         return t
 
@@ -472,15 +499,45 @@ class TournamentManager:
     def list_tournaments(self) -> List[Tournament]:
         return list(self.tournaments.values())
 
+    # ── Worker de sauvegarde ─────────────────────────────────────────────────
+
+    async def _save_worker(self):
+        """Worker pour sauvegarder les tournois de manière asynchrone"""
+        while True:
+            try:
+                tournament = await self._save_queue.get()
+                if tournament:
+                    self._save_tournament_sync(tournament)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"Save worker error: {e}")
+
     # ── Monitor (démarrage différé) ───────────────────────────────────────────
 
-    def start_monitor(self):
-        """Démarre le monitor — à appeler APRÈS que l'event loop est actif"""
+    async def start_monitor(self):
+        """Démarre le monitor avec file d'attente de sauvegarde"""
+        logger.info("Starting tournament monitor...")
+
+        # Démarrer le worker de sauvegarde
+        if not self._save_task:
+            self._save_task = asyncio.create_task(self._save_worker())
+            logger.info("Save worker started")
+
+        # Démarrer le monitor
         if self._monitor_task is None:
             self._monitor_task = asyncio.create_task(self._monitor_loop())
             logger.info("Tournament monitor started")
+        else:
+            logger.info("Tournament monitor already running")
 
     async def stop_monitor(self):
+        if self._save_task:
+            self._save_task.cancel()
+            try:
+                await self._save_task
+            except asyncio.CancelledError:
+                pass
         if self._monitor_task:
             self._monitor_task.cancel()
             try:
@@ -491,57 +548,104 @@ class TournamentManager:
             logger.info("Tournament monitor stopped")
 
     async def _monitor_loop(self):
-        """Boucle de surveillance : démarrage auto, blind clock, rééquilibrage"""
+        """Boucle de surveillance optimisée"""
+        logger.info("Monitor loop started")
+
+        last_level_check = datetime.utcnow()
+        loop_count = 0
+
         while True:
             try:
+                loop_count += 1
+                if loop_count % 10 == 0:
+                    logger.info(f"Monitor loop running, {len(self.tournaments)} tournaments")
+
                 now = datetime.utcnow()
+
                 for t in list(self.tournaments.values()):
-                    # Démarrage automatique
-                    if (t.status == TournamentStatus.REGISTRATION
-                            and now >= t.start_time
-                            and t.id not in self._starting):
+                    # Si le tournoi est en registration et que l'heure de début est passée
+                    if t.status == TournamentStatus.REGISTRATION and now >= t.start_time:
                         registered = t.get_registered_players()
+                        logger.info(f"Tournament {t.name}: ready to start? registered={len(registered)}, min={t.min_players_to_start}")
+
                         if len(registered) >= t.min_players_to_start:
-                            self._starting.add(t.id)
-                            asyncio.create_task(self._start_tournament(t))
+                            async with self._starting_lock:
+                                if t.id not in self._starting:
+                                    logger.info(f"Starting tournament {t.name}")
+                                    self._starting.add(t.id)
+                                    asyncio.create_task(self._start_tournament(t))
+                        else:
+                            logger.info(f"Tournament {t.name}: not enough players ({len(registered)}/{t.min_players_to_start})")
 
-                    # Blind clock
-                    if t.status == TournamentStatus.IN_PROGRESS:
-                        remaining = t.seconds_until_next_level()
-                        if remaining is not None and remaining <= 0:
-                            if t.advance_level():
-                                await self._broadcast_level_change(t)
-                                # Mettre à jour les blinds sur les tables
-                                await self._update_table_blinds(t)
-                                self.save_tournament(t)
+                    # Si le tournoi est in_progress mais les tables ne tournent pas, forcer le démarrage
+                    elif t.status == TournamentStatus.IN_PROGRESS:
+                        for table_id in t.tables:
+                            table = self.lobby.tables.get(table_id) if self.lobby else None
+                            if table and table.status.value != "playing":
+                                logger.info(f"Table {table_id} not playing (status={table.status}), forcing start")
+                                table._try_start_game()
 
-                    # Rééquilibrage
-                    if t.status == TournamentStatus.IN_PROGRESS:
-                        await self.rebalance_tables(t)
+                # Vérification des blinds
+                if (now - last_level_check).total_seconds() >= 1:
+                    for t in self.tournaments.values():
+                        if t.status == TournamentStatus.IN_PROGRESS:
+                            remaining = t.seconds_until_next_level()
+                            if remaining is not None and remaining <= 0:
+                                if t.advance_level():
+                                    logger.info(f"Tournament {t.name} advanced to level {t.current_level + 1}")
+                                    await self._broadcast_level_change(t)
+                                    await self._update_table_blinds(t)
+                                    await self.save_tournament(t)
+                    last_level_check = now
+
+                # Rééquilibrage toutes les 30s
+                if now.second % 30 == 0:
+                    for t in self.tournaments.values():
+                        if t.status == TournamentStatus.IN_PROGRESS:
+                            await self.rebalance_tables(t)
 
             except asyncio.CancelledError:
+                logger.info("Monitor loop cancelled")
                 raise
             except Exception as e:
-                logger.error(f"Monitor error: {e}")
+                logger.error(f"Monitor error: {e}", exc_info=True)
 
-            await asyncio.sleep(5)
-
-    # ── Démarrage d'un tournoi ────────────────────────────────────────────────
+            await asyncio.sleep(1)
 
     async def _start_tournament(self, tournament: Tournament):
         try:
+            # Mettre à jour le statut
             tournament.status = TournamentStatus.IN_PROGRESS
             tournament.level_started_at = datetime.utcnow()
-            await self._create_tournament_tables(tournament)
-            self.save_tournament(tournament)
 
-            # Attendre un peu puis vérifier les absents
-            await asyncio.sleep(PRESTART_ABSENT_TIMEOUT)
+            # Créer les tables
+            await self._create_tournament_tables(tournament)
+            await self.save_tournament(tournament)
+
+            # Attendre 5 secondes pour que les joueurs se connectent
+            logger.info(f"Tournament {tournament.name} starting, waiting 5s for players to connect...")
+            await asyncio.sleep(5)
+
+            # Vérifier les absents et forcer le démarrage des tables
             await self._check_absent_players(tournament)
+
+            # Forcer le démarrage des tables qui n'ont pas démarré
+            for table_id in tournament.tables:
+                table = self.lobby.tables.get(table_id) if self.lobby else None
+                if table:
+                    active_players = [p for p in table.players.values() if p.chips > 0]
+                    logger.info(f"Table {table_id}: {len(active_players)} active players")
+
+                    if len(active_players) >= 2:
+                        if not table._game_task:
+                            logger.info(f"Starting game loop for table {table_id}")
+                            table._game_task = asyncio.create_task(table._game_loop())
+                        else:
+                            logger.info(f"Game loop already running for table {table_id}")
 
             logger.info(f"Tournament {tournament.name} started!")
         except Exception as e:
-            logger.error(f"Start tournament {tournament.id}: {e}")
+            logger.error(f"Start tournament {tournament.id}: {e}", exc_info=True)
             tournament.status = TournamentStatus.REGISTRATION
         finally:
             self._starting.discard(tournament.id)
@@ -554,6 +658,11 @@ class TournamentManager:
         from .models import CreateTableRequest
 
         registered = [p for p in tournament.players if p.get('status') == 'registered']
+
+        if not registered:
+            logger.warning(f"No registered players for tournament {tournament.name}")
+            return
+
         for p in registered:
             p['chips'] = tournament.starting_chips
 
@@ -561,6 +670,8 @@ class TournamentManager:
 
         players_per_table = 9
         num_tables = (len(registered) + players_per_table - 1) // players_per_table
+
+        logger.info(f"Creating {num_tables} tables for {len(registered)} players")
 
         for table_num in range(num_tables):
             table_request = CreateTableRequest(
@@ -573,20 +684,29 @@ class TournamentManager:
                 game_variant=GameVariant(tournament.game_variant) if tournament.game_variant else GameVariant.HOLDEM,
             )
             tournament.tables.append(table.id)
+            logger.info(f"Created table {table.id} for tournament {tournament.name}")
 
             start_idx = table_num * players_per_table
             end_idx = min(start_idx + players_per_table, len(registered))
 
             for i, player in enumerate(registered[start_idx:end_idx]):
-                await self.lobby.join_table(player['user_id'], table.id)
-                player['table_id'] = table.id
-                player['position'] = i
-                player['status'] = 'registered'
+                success = await self.lobby.join_table(player['user_id'], table.id)
+                if success:
+                    player['table_id'] = table.id
+                    player['position'] = i
+                    player['status'] = 'registered'
+                    logger.info(f"Player {player['username']} added to table {table.id} at position {i}")
+                else:
+                    logger.error(f"Failed to add player {player['username']} to table {table.id}")
 
-        self.save_tournament(tournament)
+            # Forcer le démarrage de la table
+            table._try_start_game()
+
+        await self.save_tournament(tournament)
         logger.info(f"{num_tables} tables créées pour {tournament.name}")
 
     async def _check_absent_players(self, tournament: Tournament):
+        """Vérifie les joueurs absents mais ne les marque pas immédiatement"""
         if not self.lobby:
             return
         ws_mgr = self._get_ws_manager()
@@ -601,10 +721,9 @@ class TournamentManager:
             if not table_id:
                 continue
             if not ws_mgr.is_connected(table_id, uid):
-                tournament.on_player_disconnect(uid)
-                logger.info(f"[{tournament.id}] Player {uid} absent → sit-out")
+                logger.info(f"[{tournament.id}] Player {uid} not connected, will wait")
 
-        self.save_tournament(tournament)
+        await self.save_tournament(tournament)
 
     async def _update_table_blinds(self, tournament: Tournament):
         if not self.lobby:
@@ -637,7 +756,7 @@ class TournamentManager:
             table = self.lobby.tables.get(tid)
             if table:
                 active = len([p for p in table.players.values()
-                             if p.chips > 0 and p.status != 'eliminated'])
+                             if p.chips > 0 and p.status != PlayerStatus.ELIMINATED])
                 table_counts[tid] = active
             else:
                 # Table n'existe plus
@@ -677,7 +796,7 @@ class TournamentManager:
                     tournament.tables.remove(smallest_tid)
                     await self.lobby.close_table(smallest_tid)
                     logger.info(f"[{tournament.id}] Table {smallest_tid} fusionnée dans {dest_tid}")
-                    self.save_tournament(tournament)
+                    await self.save_tournament(tournament)
                     return  # un seul rééquilibrage par cycle
 
         # 3. Si écart > 2, déplacer un joueur
@@ -696,7 +815,7 @@ class TournamentManager:
                     await self._move_players(tournament, src_table, dest_table,
                                             [player.user_id])
                     logger.info(f"[{tournament.id}] Moved {player.username} from {largest_tid} to {smallest_tid}")
-                    self.save_tournament(tournament)
+                    await self.save_tournament(tournament)
 
     async def _move_players(self, tournament: Tournament,
                            src_table, dest_table, user_ids: list):
@@ -734,7 +853,6 @@ class TournamentManager:
                     'user_id': uid, 'username': username,
                     'to_table': dest_table.id,
                 })
-                # Le joueur devra se reconnecter au WS de la nouvelle table
                 await ws.send_to_user(src_table.id, uid, {
                     'type': 'table_change',
                     'new_table_id': dest_table.id,
@@ -744,21 +862,13 @@ class TournamentManager:
 
     # ── Événements WebSocket ──────────────────────────────────────────────────
 
-    def on_player_disconnect(self, user_id: str, table_id: str):
-        for tournament in self.tournaments.values():
-            if (tournament.status == TournamentStatus.IN_PROGRESS
-                    and table_id in tournament.tables):
-                if any(p['user_id'] == user_id for p in tournament.players):
-                    tournament.on_player_disconnect(user_id)
-                    self.save_tournament(tournament)
+    def on_player_disconnect(self, user_id: str):
+        self._disconnect_times[user_id] = datetime.utcnow()
+        self._sit_out[user_id] = datetime.utcnow()
 
-    def on_player_reconnect(self, user_id: str, table_id: str):
-        for tournament in self.tournaments.values():
-            if (tournament.status == TournamentStatus.IN_PROGRESS
-                    and table_id in tournament.tables):
-                if any(p['user_id'] == user_id for p in tournament.players):
-                    tournament.on_player_reconnect(user_id)
-                    self.save_tournament(tournament)
+    def on_player_reconnect(self, user_id: str):
+        self._disconnect_times.pop(user_id, None)
+        self._sit_out.pop(user_id, None)
 
     # ── Broadcasts ────────────────────────────────────────────────────────────
 

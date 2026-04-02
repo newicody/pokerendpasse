@@ -1,3 +1,4 @@
+/* frontend/css/lobby.css */
 /* ═══════════════════════════════════════════════════════════════════════════
    lobby.css — Styles du Lobby
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -65,6 +66,7 @@
 .chat-messages .msg { padding: 3px 0; word-break: break-word; }
 .chat-messages .msg-user { color: var(--accent); font-weight: 600; }
 .chat-messages .msg-system { color: var(--text-muted); font-style: italic; font-size: 11px; }
+.chat-messages .msg-time { color: var(--text-muted); font-size: 10px; margin-right: 6px; }
 .chat-input-area {
     display: flex; gap: 4px; padding: 8px; border-top: 1px solid var(--border-subtle);
     position: relative;

@@ -111,17 +111,24 @@ const ThemeManager = (() => {
             root.style.setProperty(prop, val);
         }
         document.body.setAttribute('data-theme', name);
-        try { localStorage.setItem('poker_theme', name); } catch (e) {}
+        try { localStorage.setItem('poker_theme', name); } catch(e) {}
+        // Synchroniser avec SettingsManager
+        if (typeof SettingsManager !== 'undefined') {
+            SettingsManager.set('theme', name);
+        }
     }
-
-    function getTheme() { return _current; }
+  function getTheme() { return _current; }
     function getAvailable() { return Object.keys(THEMES); }
 
-    // Auto-load
+    // Charger depuis localStorage ou SettingsManager
     try {
-        const saved = localStorage.getItem('poker_theme');
+        let saved = null;
+        if (typeof SettingsManager !== 'undefined') {
+            saved = SettingsManager.get('theme');
+        }
+        if (!saved) saved = localStorage.getItem('poker_theme');
         if (saved && THEMES[saved]) setTheme(saved);
-    } catch (e) {}
+    } catch(e) {}
 
     return { setTheme, getTheme, getAvailable };
 })();
