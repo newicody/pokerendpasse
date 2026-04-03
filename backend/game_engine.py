@@ -519,20 +519,23 @@ class PokerTable:
         await self._broadcast_state()
 
         # Fonctions utilitaires pour distribuer les cartes communautaires
-        def _distribute_community(count: int):
+
+
+        async def _distribute_community(count: int):
             nonlocal deck_idx
-            # Burn
+            # Burn card
             if deck_idx < len(self._deck):
                 deck_idx += 1
             cards = self._deck[deck_idx:deck_idx + count]
             deck_idx += count
             self._community_cards.extend([f"{c[0]}{c[1]}" for c in cards])
             self._street = self._get_street_name(len(self._community_cards))
-            asyncio.create_task(self._broadcast({
+            # FIX#11 — await au lieu de create_task
+            await self._broadcast({
                 'type': 'community_cards',
                 'cards': self._community_cards,
-            }))
-            asyncio.create_task(self._broadcast_state())
+            })
+            await self._broadcast_state()
 
         def active_count(p_list):
             return sum(1 for p in p_list if p.status == PlayerStatus.ACTIVE and p.chips > 0)
@@ -546,7 +549,7 @@ class PokerTable:
             return
 
         # Flop
-        _distribute_community(3)
+        await _distribute_community(3)
         await self._betting_round(active_players, 'flop')
         if active_count(active_players) <= 1:
             winners = await self._resolve_hand(active_players)
@@ -555,7 +558,7 @@ class PokerTable:
             return
 
         # Turn
-        _distribute_community(1)
+        await _distribute_community(1)
         await self._betting_round(active_players, 'turn')
         if active_count(active_players) <= 1:
             winners = await self._resolve_hand(active_players)
@@ -564,7 +567,7 @@ class PokerTable:
             return
 
         # River
-        _distribute_community(1)
+        await _distribute_community(1)
         await self._betting_round(active_players, 'river')
         if active_count(active_players) <= 1:
             winners = await self._resolve_hand(active_players)
@@ -580,46 +583,65 @@ class PokerTable:
         await self._cleanup_hand(active_players)
 
     # ── Betting Round ────────────────────────────────────────────────────────
+ 
+
     async def _betting_round(self, players: List[PlayerState], street: str):
         logger.info(f"[{self.name}] ===== BETTING ROUND: {street} =====")
-
+ 
         acting = [p for p in players if p.status == PlayerStatus.ACTIVE and p.chips > 0]
         if len(acting) <= 1:
             return
-
+ 
         n = len(players)
+ 
+        # Déterminer le premier à parler
         if street == 'preflop':
             bb_idx = next((i for i, p in enumerate(players) if p.is_big_blind), 0)
             first = (bb_idx + 1) % n
-            while players[first].status != PlayerStatus.ACTIVE and len(acting) > 0:
-                first = (first + 1) % n
         else:
             d_idx = next((i for i, p in enumerate(players) if p.is_dealer), 0)
             first = (d_idx + 1) % n
-            while players[first].status != PlayerStatus.ACTIVE and len(acting) > 0:
-                first = (first + 1) % n
-
-        if players[first].status != PlayerStatus.ACTIVE:
-            return
-
-        close_seat = (first - 1 + n) % n
+ 
+        # Avancer vers le prochain joueur actif
+        attempts = 0
+        while players[first].status != PlayerStatus.ACTIVE or players[first].chips <= 0:
+            first = (first + 1) % n
+            attempts += 1
+            if attempts >= n:
+                return  # Personne ne peut agir
+ 
         current_bet = max(p.current_bet for p in players) if players else 0
+ 
+        # Set de joueurs qui doivent encore agir dans cette orbite
+        # Au départ, tout le monde. Quand quelqu'un raise, on reset.
+        must_act = set()
+        for p in players:
+            if p.status == PlayerStatus.ACTIVE and p.chips > 0:
+                must_act.add(p.user_id)
+ 
         pos = first
-        orbits = 0
-
-        while orbits < n * 5:
-            orbits += 1
+        max_iterations = n * 6  # garde-fou absolu
+        iterations = 0
+ 
+        while must_act and iterations < max_iterations:
+            iterations += 1
             p = players[pos % n]
-
+ 
             if p.status != PlayerStatus.ACTIVE or p.chips <= 0:
-                if pos % n == close_seat:
-                    break
+                must_act.discard(p.user_id)
                 pos += 1
                 continue
-
+ 
+            if p.user_id not in must_act:
+                pos += 1
+                # Vérifier si on a fait un tour complet
+                if pos % n == first:
+                    break
+                continue
+ 
             to_call = current_bet - p.current_bet
             can_check = (to_call == 0)
-
+ 
             # Quick bets
             quick_bets = QuickBetCalculator.calculate(
                 pot=self._pot + sum(x.current_bet for x in players),
@@ -628,31 +650,34 @@ class PokerTable:
                 player_chips=p.chips,
                 min_raise=self._min_raise,
             )
-
+ 
             self._current_actor = p.user_id
             await self._broadcast_state(quick_bets=quick_bets)
-
-            # Obtenir l'action du joueur
+ 
             action, amount = await self._get_player_action(p, can_check)
-
-            # Appliquer l'action
             was_raise = await self._apply_action(p, action, amount, to_call, players)
-
+ 
+            # Retirer ce joueur de must_act (il a agi)
+            must_act.discard(p.user_id)
+ 
             if was_raise:
                 current_bet = p.current_bet
-                close_seat = (pos - 1 + n) % n
-
+                # Tout le monde doit re-agir sauf le raiser
+                must_act = set()
+                for pp in players:
+                    if (pp.status == PlayerStatus.ACTIVE and pp.chips > 0
+                            and pp.user_id != p.user_id):
+                        must_act.add(pp.user_id)
+ 
             self._current_actor = None
-
+ 
+            # Vérifier s'il reste assez de joueurs
             remaining = [x for x in players if x.status == PlayerStatus.ACTIVE and x.chips > 0]
             if len(remaining) <= 1:
                 break
-
-            if pos % n == close_seat:
-                break
-
+ 
             pos += 1
-
+ 
         self._current_actor = None
         logger.info(f"[{self.name}] ===== BETTING ROUND END ===== (pot={self._pot})")
 
@@ -893,7 +918,7 @@ class PokerTable:
                             tournament.eliminate_player(p.user_id, rank)
                             total_remaining -= 1
                             await tm._broadcast_player_eliminated(tournament, p.user_id, rank)
-                        tm.save_tournament(tournament)
+                        await tm.save_tournament(tournament)
             except Exception as e:
                 logger.error(f"[{self.name}] Elimination notify error: {e}")
 

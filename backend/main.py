@@ -30,7 +30,7 @@ from .models import (
     ActionType, CreateUserRequest, TableStatus, AdminActionRequest,
     LoginRequest, RegisterRequest, UpdateProfileRequest, ChangePasswordRequest,
     CreateTournamentRequest, RegisterTournamentRequest, UpdateTournamentRequest,
-    GameVariant, TournamentStatus,
+    GameVariant, TournamentStatus,OrganizeTournamentRequest
 )
 from .lobby import Lobby
 from .websocket_manager import WebSocketManager
@@ -304,9 +304,8 @@ async def join_table(table_id: str, request: JoinTableRequest):
 
 @app.post("/api/tables/{table_id}/leave")
 async def leave_table(table_id: str, user_id: str):
-    await lobby.leave_table(user_id)
+    await lobby.leave_table(user_id, table_id)
     return json_response({"success": True})
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TOURNAMENTS
@@ -370,6 +369,8 @@ async def get_tournament(tid: str):
             for p in registered
         ],
         'tables': t.tables, 'winners': t.winners,
+        'organizer_id': getattr(t, 'organizer_id', ''),
+        'is_organizer': current_user and getattr(t, 'organizer_id', '') == current_user.get('id', ''),
     })
 
 @app.post("/api/tournaments/{tid}/register")
@@ -794,6 +795,193 @@ async def get_tournament_results(tid: str):
         'players_count': len(t.players),
     })
 
+@app.post("/api/organize/create")
+async def organize_create_tournament(
+    request: OrganizeTournamentRequest,
+    current_user: Dict = Depends(get_current_user),
+):
+    """Crée un tournoi en tant qu'organisateur (tout utilisateur authentifié)."""
+    now = datetime.utcnow()
+ 
+    # Limiter le nombre de tournois actifs par organisateur (anti-spam)
+    user_tournaments = [
+        t for t in tournament_manager.list_tournaments()
+        if getattr(t, 'organizer_id', '') == current_user['id']
+        and t.status in (TournamentStatus.REGISTRATION, TournamentStatus.IN_PROGRESS, TournamentStatus.PAUSED)
+    ]
+    if len(user_tournaments) >= 3:
+        raise HTTPException(status_code=400, detail="Maximum 3 tournois actifs par organisateur")
+ 
+    # Résoudre le blind preset
+    blind_structure = BLIND_PRESETS.get(request.blind_preset, BLIND_PRESETS["standard"])
+ 
+    reg_start = now
+    reg_end = now + timedelta(minutes=request.registration_duration_minutes)
+    start_time = now + timedelta(minutes=request.start_delay_minutes)
+ 
+    # S'assurer que start_time > reg_end
+    if start_time <= reg_end:
+        start_time = reg_end + timedelta(minutes=5)
+ 
+    t = tournament_manager.create_tournament(
+        name=request.name,
+        description=request.description or "",
+        registration_start=reg_start,
+        registration_end=reg_end,
+        start_time=start_time,
+        max_players=request.max_players,
+        min_players_to_start=request.min_players_to_start,
+        prize_pool=0,  # freeroll uniquement
+        itm_percentage=10.0,
+        blind_structure=blind_structure,
+        game_variant=request.game_variant.value if hasattr(request.game_variant, 'value') else str(request.game_variant),
+        starting_chips=request.starting_chips,
+        organizer_id=current_user['id'],
+    )
+ 
+    # Auto-inscription de l'organisateur
+    user = auth_manager.get_user_by_id(current_user['id'])
+    username = user['username'] if user else current_user.get('username', '?')
+    avatar = user.get('avatar') if user else None
+    t.register_player(current_user['id'], username, avatar)
+    await tournament_manager.save_tournament(t)
+ 
+    logger.info(f"Tournament organized by {username}: {t.name} ({t.id})")
+    return json_response({
+        "success": True,
+        "tournament_id": t.id,
+        "name": t.name,
+        "registration_end": reg_end.isoformat(),
+        "start_time": start_time.isoformat(),
+    })
+ 
+ 
+@app.get("/api/organize/my-tournaments")
+async def organize_my_tournaments(current_user: Dict = Depends(get_current_user)):
+    """Liste les tournois créés par l'utilisateur courant."""
+    my_tournaments = []
+    for t in tournament_manager.list_tournaments():
+        if getattr(t, 'organizer_id', '') == current_user['id']:
+            registered = t.get_registered_players()
+            my_tournaments.append({
+                'id': t.id,
+                'name': t.name,
+                'status': t.status.value if hasattr(t.status, 'value') else str(t.status),
+                'game_variant': t.game_variant,
+                'players_count': len(registered),
+                'max_players': t.max_players,
+                'min_players_to_start': t.min_players_to_start,
+                'registration_end': t.registration_end.isoformat() if t.registration_end else None,
+                'start_time': t.start_time.isoformat() if t.start_time else None,
+                'created_at': t.created_at.isoformat() if t.created_at else None,
+                'current_level': t.current_level,
+                'tables_count': len(t.tables),
+            })
+    return json_response(my_tournaments)
+ 
+ 
+@app.put("/api/organize/{tid}")
+async def organize_update_tournament(
+    tid: str,
+    request: UpdateTournamentRequest,
+    current_user: Dict = Depends(get_current_user),
+):
+    """Modifie un tournoi (seulement l'organisateur ou un admin)."""
+    t = tournament_manager.get_tournament(tid)
+    if not t:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+ 
+    is_organizer = getattr(t, 'organizer_id', '') == current_user['id']
+    is_admin = current_user.get('is_admin', False)
+    if not is_organizer and not is_admin:
+        raise HTTPException(status_code=403, detail="Seul l'organisateur peut modifier ce tournoi")
+ 
+    # On ne peut modifier que pendant les inscriptions
+    if t.status != TournamentStatus.REGISTRATION and not is_admin:
+        raise HTTPException(status_code=400, detail="Le tournoi ne peut plus être modifié")
+ 
+    for field_name in ('name', 'description', 'max_players', 'min_players_to_start'):
+        val = getattr(request, field_name, None)
+        if val is not None:
+            setattr(t, field_name, val)
+ 
+    await tournament_manager.save_tournament(t)
+    return json_response({"success": True})
+ 
+ 
+@app.post("/api/organize/{tid}/cancel")
+async def organize_cancel_tournament(
+    tid: str,
+    current_user: Dict = Depends(get_current_user),
+):
+    """Annule un tournoi (seulement l'organisateur ou un admin)."""
+    t = tournament_manager.get_tournament(tid)
+    if not t:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+ 
+    is_organizer = getattr(t, 'organizer_id', '') == current_user['id']
+    is_admin = current_user.get('is_admin', False)
+    if not is_organizer and not is_admin:
+        raise HTTPException(status_code=403, detail="Seul l'organisateur peut annuler ce tournoi")
+ 
+    if t.status == TournamentStatus.FINISHED:
+        raise HTTPException(status_code=400, detail="Tournoi déjà terminé")
+ 
+    # Si en cours → pause puis cancel
+    if t.status == TournamentStatus.IN_PROGRESS:
+        t.pause()
+ 
+    t.status = TournamentStatus.CANCELLED
+    await tournament_manager.save_tournament(t)
+ 
+    logger.info(f"Tournament {t.name} cancelled by organizer {current_user['id']}")
+    return json_response({"success": True, "status": "cancelled"})
+ 
+ 
+@app.post("/api/organize/{tid}/pause")
+async def organize_pause_tournament(
+    tid: str,
+    current_user: Dict = Depends(get_current_user),
+):
+    """Pause un tournoi en cours (organisateur ou admin)."""
+    t = tournament_manager.get_tournament(tid)
+    if not t:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+ 
+    is_organizer = getattr(t, 'organizer_id', '') == current_user['id']
+    is_admin = current_user.get('is_admin', False)
+    if not is_organizer and not is_admin:
+        raise HTTPException(status_code=403)
+ 
+    if t.status != TournamentStatus.IN_PROGRESS:
+        raise HTTPException(status_code=400, detail="Le tournoi n'est pas en cours")
+ 
+    t.pause()
+    await tournament_manager.save_tournament(t)
+    return json_response({"success": True, "status": "paused"})
+ 
+ 
+@app.post("/api/organize/{tid}/resume")
+async def organize_resume_tournament(
+    tid: str,
+    current_user: Dict = Depends(get_current_user),
+):
+    """Reprend un tournoi en pause (organisateur ou admin)."""
+    t = tournament_manager.get_tournament(tid)
+    if not t:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+ 
+    is_organizer = getattr(t, 'organizer_id', '') == current_user['id']
+    is_admin = current_user.get('is_admin', False)
+    if not is_organizer and not is_admin:
+        raise HTTPException(status_code=403)
+ 
+    if t.status != TournamentStatus.PAUSED:
+        raise HTTPException(status_code=400, detail="Le tournoi n'est pas en pause")
+ 
+    t.resume()
+    await tournament_manager.save_tournament(t)
+    return json_response({"success": True, "status": "in_progress"})
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ADMIN
@@ -809,6 +997,7 @@ async def admin_create_tournament(request: CreateTournamentRequest, _: Dict = De
         max_players=request.max_players,
         min_players_to_start=request.min_players_to_start,
         prize_pool=request.prize_pool, itm_percentage=request.itm_percentage,
+        starting_chips=request.starting_chips,
         blind_structure=request.blind_structure,
         game_variant=request.game_variant.value if hasattr(request.game_variant, 'value') else str(request.game_variant),
     )
@@ -1079,6 +1268,77 @@ async def websocket_endpoint(websocket: WebSocket, table_id: str, user_id: str):
 
             elif msg_type == 'ping':
                 await websocket.send_json({'type': 'pong'})
+
+
+            elif msg_type == 'request_full_state':
+                try:
+                    import copy
+                    state = table.get_state(for_user_id=real_user_id if not is_spectator else None)
+                    if is_spectator and isinstance(state, dict):
+                        state = copy.deepcopy(state)
+                        for p in state.get('players', []):
+                            p['hole_cards'] = []
+                    qb = None
+                    if not is_spectator and state.get('current_actor') == real_user_id:
+                        from .game_engine import QuickBetCalculator
+                        player_obj = table.players.get(real_user_id)
+                        if player_obj:
+                            current_bet = max((p.current_bet for p in table.players.values()), default=0)
+                            to_call = current_bet - player_obj.current_bet
+                            qb = QuickBetCalculator.calculate(
+                                pot=table._pot + sum(p.current_bet for p in table.players.values()),
+                                big_blind=table.big_blind, current_bet=to_call,
+                                player_chips=player_obj.chips, min_raise=table._min_raise,
+                            )
+                    msg_out = {"type": "game_state", "data": state, "is_spectator": is_spectator, "user_id": real_user_id}
+                    if qb:
+                        msg_out["quick_bets"] = qb
+                    await websocket.send_json(msg_out)
+                except Exception as e:
+                    logger.error(f"request_full_state error: {e}")
+
+            elif msg_type == 'request_full_state':
+                # FIX#17 — Renvoyer l'état complet de la table au joueur reconnecté
+                try:
+                    import copy
+                    state = table.get_state(for_user_id=real_user_id if not is_spectator else None)
+                    if is_spectator and isinstance(state, dict):
+                        state = copy.deepcopy(state)
+                        for p in state.get('players', []):
+                            p['hole_cards'] = []
+ 
+                    # Recalculer les quick_bets si c'est le tour du joueur
+                    qb = None
+                    if not is_spectator and state.get('current_actor') == real_user_id:
+                        from .game_engine import QuickBetCalculator
+                        player_obj = table.players.get(real_user_id)
+                        if player_obj:
+                            current_bet = max(
+                                (p.current_bet for p in table.players.values()), default=0
+                            )
+                            to_call = current_bet - player_obj.current_bet
+                            qb = QuickBetCalculator.calculate(
+                                pot=table._pot + sum(p.current_bet for p in table.players.values()),
+                                big_blind=table.big_blind,
+                                current_bet=to_call,
+                                player_chips=player_obj.chips,
+                                min_raise=table._min_raise,
+                            )
+ 
+                    msg_out = {
+                        "type": "game_state",
+                        "data": state,
+                        "is_spectator": is_spectator,
+                        "user_id": real_user_id,
+                    }
+                    if qb:
+                        msg_out["quick_bets"] = qb
+ 
+                    await websocket.send_json(msg_out)
+                    logger.info(f"[WS] Sent full state to {real_user_id} on request_full_state")
+                except Exception as e:
+                    logger.error(f"request_full_state error for {real_user_id}: {e}")
+
 
     except WebSocketDisconnect:
         pass

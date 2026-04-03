@@ -822,8 +822,11 @@ function setupOptionsModal() {
                     else el.value = s[key];
                 }
             }
-            const adminTab = document.getElementById('adminTab');
-            if (adminTab) adminTab.style.display = (currentUser && currentUser.is_admin) ? '' : 'none';
+     const adminTabBtn = document.getElementById('adminTabBtn');
+     if (adminTabBtn) {
+         adminTabBtn.style.display = (currentUser && currentUser.is_admin) ? '' : 'none';
+     }
+
             if (currentUser && currentUser.is_admin) {
                 const adminThemeSelect = $('adminThemeSelect');
                 if (adminThemeSelect) adminThemeSelect.value = s.theme || 'dark';
@@ -843,6 +846,8 @@ function setupOptionsModal() {
 
     // Sauvegarde des paramètres
     const saveBtn = document.getElementById('saveSettings');
+
+
     if (saveBtn) {
         saveBtn.addEventListener('click', () => {
             const ns = {
@@ -1077,6 +1082,8 @@ function setupOptionsModal() {
             toast('Thème admin appliqué', 'success');
         });
     }
+
+
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1161,6 +1168,93 @@ function setupBackButton() {
         });
     }
 }
-
+if (currentUser && currentUser.is_admin) {
+        // Mode maintenance
+        const maintenanceBtn = $('toggleMaintenanceBtn');
+        if (maintenanceBtn) {
+            maintenanceBtn.addEventListener('click', async () => {
+                try {
+                    const resp = await fetch('/api/admin/maintenance/toggle', { method: 'POST' });
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        toast(`Maintenance: ${data.maintenance ? 'activé' : 'désactivé'}`, 'success');
+                    } else { toast('Erreur maintenance', 'error'); }
+                } catch (e) { toast('Erreur réseau', 'error'); }
+            });
+        }
+ 
+        // Redémarrer toutes les tables
+        const restartBtn = $('restartAllTablesBtn');
+        if (restartBtn) {
+            restartBtn.addEventListener('click', async () => {
+                try {
+                    const resp = await fetch('/api/admin/restart-tables', { method: 'POST' });
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        toast(`${data.restarted_tables} table(s) redémarrée(s)`, 'success');
+                    } else { toast('Erreur restart', 'error'); }
+                } catch (e) { toast('Erreur réseau', 'error'); }
+            });
+        }
+ 
+        // Vider le cache utilisateur
+        const clearCacheBtn = $('clearUserCacheBtn');
+        if (clearCacheBtn) {
+            clearCacheBtn.addEventListener('click', () => {
+                localStorage.clear();
+                toast('Cache local vidé', 'success');
+            });
+        }
+ 
+        // Liste connectés
+        const listConnectedBtn = $('listConnectedBtn');
+        if (listConnectedBtn) {
+            listConnectedBtn.addEventListener('click', async () => {
+                try {
+                    const resp = await fetch('/api/admin/connected-users');
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        const users = data.users || [];
+                        toast(`${users.length} connecté(s): ${users.join(', ') || 'aucun'}`, 'info');
+                    }
+                } catch (e) { toast('Erreur', 'error'); }
+            });
+        }
+ 
+        // Rate limit
+        const applyRateLimitBtn = $('applyRateLimitBtn');
+        if (applyRateLimitBtn) {
+            applyRateLimitBtn.addEventListener('click', async () => {
+                const config = $('rateLimitConfig')?.value;
+                if (!config) return;
+                const parts = config.split(',').map(s => parseInt(s.trim()));
+                if (parts.length < 2 || isNaN(parts[0]) || isNaN(parts[1])) {
+                    toast('Format: max_requests,window_seconds', 'error');
+                    return;
+                }
+                try {
+                    const resp = await fetch('/api/admin/rate-limit', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ max_requests: parts[0], window_seconds: parts[1] })
+                    });
+                    if (resp.ok) toast('Rate limit appliqué', 'success');
+                    else toast('Erreur', 'error');
+                } catch (e) { toast('Erreur réseau', 'error'); }
+            });
+        }
+ 
+        // Thème admin
+        const saveAdminTheme = $('saveAdminTheme');
+        if (saveAdminTheme) {
+            saveAdminTheme.addEventListener('click', () => {
+                const theme = $('adminThemeSelect')?.value || 'dark';
+                if (typeof SettingsManager !== 'undefined') SettingsManager.set('theme', theme);
+                if (typeof ThemeManager !== 'undefined') ThemeManager.setTheme(theme);
+                toast('Thème admin appliqué', 'success');
+            });
+        }
+    }
+ 
 // Start
 document.addEventListener('DOMContentLoaded', init);

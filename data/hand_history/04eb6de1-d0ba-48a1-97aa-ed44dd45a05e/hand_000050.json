@@ -1,0 +1,71 @@
+{
+  "table_id": "04eb6de1-d0ba-48a1-97aa-ed44dd45a05e",
+  "table_name": "a \u2014 Table 1",
+  "tournament_id": "cb085fb9-8960-44a8-9344-f1e74d3440a1",
+  "game_variant": "holdem",
+  "hand": 50,
+  "small_blind": 15,
+  "big_blind": 30,
+  "ante": 0,
+  "pot": 45,
+  "community_cards": [],
+  "players": [
+    {
+      "user_id": "7b6b81ce-e2c5-4b45-9a64-16b63b62b45a",
+      "username": "eric",
+      "hole_cards": [
+        "4c",
+        "2c"
+      ],
+      "chips_before": 9995,
+      "chips_after": 9995,
+      "total_bet": 0,
+      "status": "folded"
+    },
+    {
+      "user_id": "31293d57-8c0a-4827-b531-c3b942b36910",
+      "username": "eric3",
+      "hole_cards": [
+        "3s",
+        "Js"
+      ],
+      "chips_before": 9990,
+      "chips_after": 9990,
+      "total_bet": 0,
+      "status": "folded"
+    },
+    {
+      "user_id": "0224ae41-37e2-4123-87ff-139ea8a0f855",
+      "username": "eric1",
+      "hole_cards": [
+        "8c",
+        "Th"
+      ],
+      "chips_before": 10015,
+      "chips_after": 10000,
+      "total_bet": 15,
+      "status": "folded"
+    },
+    {
+      "user_id": "f6c944b1-c1a0-4c38-be87-3d826eaba6b7",
+      "username": "eric2",
+      "hole_cards": [
+        "Jd",
+        "Ts"
+      ],
+      "chips_before": 10045,
+      "chips_after": 10015,
+      "total_bet": 30,
+      "status": "active"
+    }
+  ],
+  "winners": [
+    {
+      "user_id": "f6c944b1-c1a0-4c38-be87-3d826eaba6b7",
+      "username": "eric2",
+      "amount": 45,
+      "hand": "Last standing"
+    }
+  ],
+  "timestamp": "2026-03-31T10:38:37.951167"
+}

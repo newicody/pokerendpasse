@@ -247,6 +247,7 @@ class CreateTournamentRequest(BaseModel):
     prize_pool: int = 0
     itm_percentage: float = 10.0
     game_variant: GameVariant = GameVariant.HOLDEM
+    starting_chips: int = 10000
     blind_structure: Optional[List[Dict]] = None
 
     @field_validator('registration_start', 'registration_end', 'start_time', mode='before')
@@ -259,6 +260,32 @@ class CreateTournamentRequest(BaseModel):
             return value.replace(tzinfo=None)
         return value
 
+class OrganizeTournamentRequest(BaseModel):
+    """Requête simplifiée pour créer un tournoi en tant qu'organisateur."""
+    name: str
+    description: Optional[str] = ""
+    game_variant: GameVariant = GameVariant.HOLDEM
+    max_players: int = 50
+    min_players_to_start: int = 3
+    starting_chips: int = 10000
+    registration_duration_minutes: int = 30   # durée inscriptions depuis maintenant
+    start_delay_minutes: int = 45             # délai avant début depuis maintenant
+    blind_preset: str = "standard"            # standard | turbo | deepstack
+ 
+    @field_validator('max_players', mode='before')
+    @classmethod
+    def clamp_max_players(cls, v):
+        return max(2, min(int(v), 100))
+ 
+    @field_validator('min_players_to_start', mode='before')
+    @classmethod
+    def clamp_min_players(cls, v):
+        return max(2, min(int(v), 20))
+ 
+    @field_validator('starting_chips', mode='before')
+    @classmethod
+    def clamp_chips(cls, v):
+        return max(500, min(int(v), 100000))
 
 class UpdateTournamentRequest(BaseModel):
     name: Optional[str] = None

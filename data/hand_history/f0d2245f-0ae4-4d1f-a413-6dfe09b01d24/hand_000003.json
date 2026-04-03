@@ -1,0 +1,47 @@
+{
+  "table_id": "f0d2245f-0ae4-4d1f-a413-6dfe09b01d24",
+  "table_name": "hehe \u2014 Table 1",
+  "tournament_id": "453ea7f5-5dda-4068-85d2-777a1d8712de",
+  "game_variant": "holdem",
+  "hand": 3,
+  "small_blind": 15,
+  "big_blind": 30,
+  "ante": 0,
+  "pot": 0,
+  "community_cards": [],
+  "players": [
+    {
+      "user_id": "7b6b81ce-e2c5-4b45-9a64-16b63b62b45a",
+      "username": "eric",
+      "hole_cards": [
+        "4c",
+        "Jd"
+      ],
+      "chips_before": 10000,
+      "chips_after": 9985,
+      "total_bet": 15,
+      "status": "folded"
+    },
+    {
+      "user_id": "0224ae41-37e2-4123-87ff-139ea8a0f855",
+      "username": "eric1",
+      "hole_cards": [
+        "8d",
+        "2s"
+      ],
+      "chips_before": 10045,
+      "chips_after": 10015,
+      "total_bet": 30,
+      "status": "active"
+    }
+  ],
+  "winners": [
+    {
+      "user_id": "0224ae41-37e2-4123-87ff-139ea8a0f855",
+      "username": "eric1",
+      "amount": 45,
+      "hand": "Last standing"
+    }
+  ],
+  "timestamp": "2026-04-02T23:58:15.112784"
+}

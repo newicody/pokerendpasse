@@ -9,6 +9,7 @@ let currentUser = null;
 let chatWs = null;
 let chatReconnectTimer = null;
 
+
 // ══════════════════════════════════════════════════════════════════════════════
 // Initialisation
 // ══════════════════════════════════════════════════════════════════════════════
@@ -18,6 +19,8 @@ async function init() {
     setupOptionsModal();
     setupChat();
     setupLocalTime();
+    setupOrganiser();
+    setupTournoiTab();
     await loadTournaments();
     await loadTables();
     setInterval(loadTournaments, 15000);
@@ -59,7 +62,7 @@ function updateAuthUI() {
     const optionsBtn = $('optionsBtn');
 
     if (currentUser) {
-        i	f (display) display.textContent = `👤 ${currentUser.username}`;
+        if (display) display.textContent = `👤 ${currentUser.username}`;
         if (loginBtn) loginBtn.style.display = 'none';
         if (registerBtn) registerBtn.style.display = 'none';
         if (logoutBtn) logoutBtn.style.display = '';
@@ -70,6 +73,7 @@ function updateAuthUI() {
         if (avatar && currentUser.avatar && currentUser.avatar !== 'default') {
             avatar.src = currentUser.avatar;
         }
+        if (tournoiTabBtn) tournoiTabBtn.style.display = currentUser.is_admin ? '' : 'none';
         // Afficher ou masquer l'onglet admin
         const adminTabBtn = document.getElementById('adminTabBtn');
         if (adminTabBtn) adminTabBtn.style.display = currentUser.is_admin ? '' : 'none'
@@ -84,6 +88,7 @@ function updateAuthUI() {
         if (registerBtn) registerBtn.style.display = '';
         if (logoutBtn) logoutBtn.style.display = 'none';
         if (optionsBtn) optionsBtn.style.display = '';
+        if ($('tournoiTabBtn')) $('tournoiTabBtn').style.display = 'none';
     }
 }
 
@@ -991,6 +996,335 @@ function showToast(message, type = 'info') {
     setTimeout(() => el.classList.add('show'), 10);
     setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 300); }, 3000);
 }
-
+// ── Blind Presets (même structure que backend DEFAULT_BLIND_STRUCTURE) ───────
+const ORG_BLINDS = {
+    turbo: [
+        {sb:15,bb:30,ante:0,dur:6},{sb:25,bb:50,ante:0,dur:6},{sb:50,bb:100,ante:10,dur:6},
+        {sb:75,bb:150,ante:15,dur:6},{sb:100,bb:200,ante:25,dur:6},{sb:150,bb:300,ante:25,dur:8},
+        {sb:200,bb:400,ante:50,dur:8},{sb:300,bb:600,ante:75,dur:8},{sb:500,bb:1000,ante:100,dur:10},
+        {sb:750,bb:1500,ante:150,dur:10},{sb:1000,bb:2000,ante:200,dur:10},
+    ],
+    standard: [
+        {sb:10,bb:20,ante:0,dur:10},{sb:15,bb:30,ante:0,dur:10},{sb:25,bb:50,ante:0,dur:10},
+        {sb:50,bb:100,ante:10,dur:10},{sb:75,bb:150,ante:15,dur:10},{sb:100,bb:200,ante:25,dur:10},
+        {sb:150,bb:300,ante:25,dur:12},{sb:200,bb:400,ante:50,dur:12},{sb:300,bb:600,ante:75,dur:15},
+        {sb:500,bb:1000,ante:100,dur:15},{sb:750,bb:1500,ante:150,dur:15},{sb:1000,bb:2000,ante:200,dur:20},
+    ],
+    deep: [
+        {sb:5,bb:10,ante:0,dur:15},{sb:10,bb:20,ante:0,dur:15},{sb:15,bb:30,ante:0,dur:15},
+        {sb:25,bb:50,ante:5,dur:15},{sb:50,bb:100,ante:10,dur:15},{sb:75,bb:150,ante:15,dur:20},
+        {sb:100,bb:200,ante:25,dur:20},{sb:150,bb:300,ante:25,dur:20},{sb:200,bb:400,ante:50,dur:20},
+        {sb:300,bb:600,ante:75,dur:25},{sb:500,bb:1000,ante:100,dur:25},
+    ],
+};
+let orgBlinds = ORG_BLINDS.turbo.map(b => ({...b}));
+ 
+function setupTournoiTab() {
+    // Raccourcis planification
+    $('orgQuick5')?.addEventListener('click', () => orgQuickSchedule(5));
+    $('orgQuick15')?.addEventListener('click', () => orgQuickSchedule(15));
+    $('orgQuick60')?.addEventListener('click', () => orgQuickSchedule(60));
+ 
+    // Presets blinds
+    document.querySelectorAll('.org-blind-preset').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.org-blind-preset').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const preset = btn.dataset.preset;
+            if (ORG_BLINDS[preset]) {
+                orgBlinds = ORG_BLINDS[preset].map(b => ({...b}));
+                orgRenderBlinds();
+            }
+        });
+    });
+ 
+    // Ajouter niveau
+    $('orgAddLevel')?.addEventListener('click', () => {
+        const last = orgBlinds[orgBlinds.length - 1] || {sb:500,bb:1000,ante:100,dur:10};
+        orgBlinds.push({sb: last.sb*2, bb: last.bb*2, ante: Math.round(last.ante*1.5), dur: last.dur});
+        orgRenderBlinds();
+    });
+ 
+    // Créer
+    $('orgCreateBtn')?.addEventListener('click', orgCreateTournament);
+ 
+    // Charger les blinds par défaut
+    orgRenderBlinds();
+ 
+    // Remplir les dates par défaut quand on ouvre l'onglet
+    const tournoiTabBtn = $('tournoiTabBtn');
+    if (tournoiTabBtn) {
+        tournoiTabBtn.addEventListener('click', () => {
+            orgPopulateDates();
+            orgLoadTournamentsList();
+        });
+    }
+}
+ 
+function orgPopulateDates() {
+    const toLocal = (d) => new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    const now = new Date();
+    if ($('orgRegStart') && !$('orgRegStart').value) $('orgRegStart').value = toLocal(now);
+    if ($('orgRegEnd') && !$('orgRegEnd').value) $('orgRegEnd').value = toLocal(new Date(now.getTime() + 3600000));
+    if ($('orgStart') && !$('orgStart').value) $('orgStart').value = toLocal(new Date(now.getTime() + 7200000));
+}
+ 
+function orgQuickSchedule(min) {
+    const toLocal = (d) => new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    const now = new Date();
+    const start = new Date(now.getTime() + min * 60000);
+    $('orgRegStart').value = toLocal(now);
+    $('orgRegEnd').value = toLocal(new Date(start.getTime() - 120000));
+    $('orgStart').value = toLocal(start);
+    showToast(`Planifié dans ${min} min`, 'success');
+}
+ 
+function orgRenderBlinds() {
+    const body = $('orgBlindsBody');
+    if (!body) return;
+    body.innerHTML = orgBlinds.map((b, i) => `<tr>
+        <td style="color:var(--text-muted);font-weight:600;padding:2px 4px">${i+1}</td>
+        <td><input type="number" value="${b.sb}" min="1" style="width:60px;text-align:center;font-size:11px;padding:2px;background:var(--bg-tertiary);border:1px solid var(--border-subtle);border-radius:3px;color:var(--text-primary)" onchange="orgBlinds[${i}].sb=+this.value"></td>
+        <td><input type="number" value="${b.bb}" min="1" style="width:60px;text-align:center;font-size:11px;padding:2px;background:var(--bg-tertiary);border:1px solid var(--border-subtle);border-radius:3px;color:var(--text-primary)" onchange="orgBlinds[${i}].bb=+this.value"></td>
+        <td><input type="number" value="${b.ante}" min="0" style="width:50px;text-align:center;font-size:11px;padding:2px;background:var(--bg-tertiary);border:1px solid var(--border-subtle);border-radius:3px;color:var(--text-primary)" onchange="orgBlinds[${i}].ante=+this.value"></td>
+        <td><input type="number" value="${b.dur}" min="1" max="60" style="width:40px;text-align:center;font-size:11px;padding:2px;background:var(--bg-tertiary);border:1px solid var(--border-subtle);border-radius:3px;color:var(--text-primary)" onchange="orgBlinds[${i}].dur=+this.value"></td>
+        <td><button onclick="orgBlinds.splice(${i},1);orgRenderBlinds()" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px;opacity:0.6">✕</button></td>
+    </tr>`).join('');
+}
+ 
+async function orgCreateTournament() {
+    const name = $('orgName')?.value?.trim();
+    if (!name) { showToast('Nom requis', 'error'); return; }
+    if (!$('orgRegStart')?.value || !$('orgRegEnd')?.value || !$('orgStart')?.value) {
+        showToast('Dates requises', 'error'); return;
+    }
+    const data = {
+        name,
+        description: '',
+        game_variant: $('orgVariant')?.value || 'holdem',
+        max_players: parseInt($('orgMax')?.value) || 100,
+        min_players_to_start: parseInt($('orgMin')?.value) || 3,
+        prize_pool: parseInt($('orgPrize')?.value) || 0,
+        itm_percentage: parseFloat($('orgItm')?.value) || 10,
+        registration_start: new Date($('orgRegStart').value).toISOString(),
+        registration_end: new Date($('orgRegEnd').value).toISOString(),
+        start_time: new Date($('orgStart').value).toISOString(),
+        blind_structure: orgBlinds.map((b, i) => ({
+            level: i+1, small_blind: b.sb, big_blind: b.bb, ante: b.ante, duration: b.dur,
+        })),
+    };
+    try {
+        const resp = await fetch('/api/admin/tournaments', {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data),
+        });
+        if (resp.ok) {
+            showToast(`Tournoi "${name}" créé !`, 'success');
+            $('orgName').value = '';
+            loadTournaments();
+            orgLoadTournamentsList();
+        } else {
+            const err = await resp.json().catch(() => ({}));
+            showToast(err.detail || 'Erreur', 'error');
+        }
+    } catch (e) { showToast('Erreur réseau', 'error'); }
+}
+ 
+// ── Liste des tournois dans l'onglet Options ────────────────────────────────
+ 
+async function orgLoadTournamentsList() {
+    const container = $('orgTournamentsList');
+    if (!container) return;
+    try {
+        const resp = await fetch('/api/tournaments');
+        if (!resp.ok) return;
+        const tournaments = await resp.json();
+        if (!tournaments.length) {
+            container.innerHTML = '<p style="color:var(--text-muted)">Aucun tournoi</p>';
+            return;
+        }
+        const order = {in_progress:0, registration:1, paused:2, finished:3, cancelled:4};
+        tournaments.sort((a, b) => (order[a.status]??5) - (order[b.status]??5));
+ 
+        container.innerHTML = tournaments.map(t => {
+            const variant = t.game_variant === 'plo' ? 'PLO' : "Hold'em";
+            let actions = '';
+            if (t.status === 'registration') {
+                actions += `<button class="btn-small btn-success" onclick="orgForceStart('${t.id}')">▶ Lancer</button>`;
+                actions += `<button class="btn-small btn-danger" onclick="orgDelete('${t.id}')">🗑</button>`;
+            } else if (t.status === 'in_progress') {
+                actions += `<button class="btn-small" onclick="orgPause('${t.id}')">⏸</button>`;
+                actions += `<button class="btn-small" onclick="orgReconnectAll('${t.id}')">🔄 Reconnecter</button>`;
+                actions += `<button class="btn-small" onclick="orgRestartTables('${t.id}')">🔁 Tables</button>`;
+            } else if (t.status === 'paused') {
+                actions += `<button class="btn-small btn-success" onclick="orgResume('${t.id}')">▶ Reprendre</button>`;
+            }
+            if (t.status === 'finished') {
+                actions += `<a href="/tournament/${t.id}/results" class="btn-small">📊</a>`;
+            }
+            actions += `<button class="btn-small" onclick="orgShowPlayers('${t.id}')">👥</button>`;
+ 
+            const blinds = t.current_blinds ? `${t.current_blinds.small_blind}/${t.current_blinds.big_blind}` : '—';
+            return `<div style="background:var(--bg-tertiary);border:1px solid var(--border-subtle);border-radius:8px;padding:10px;margin-bottom:8px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                    <strong style="font-size:13px">${escapeHtml(t.name)}</strong>
+                    <span class="status-badge status-${t.status}">${t.status}</span>
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">
+                    ${variant} · ${t.players_count}/${t.max_players} joueurs · Blinds ${blinds}
+                    ${t.prize_pool > 0 ? ` · 💰 ${t.prize_pool}` : ' · Freeroll'}
+                </div>
+                <div style="display:flex;gap:4px;flex-wrap:wrap">${actions}</div>
+            </div>`;
+        }).join('');
+    } catch (e) { container.innerHTML = '<p style="color:var(--danger)">Erreur</p>'; }
+}
+ 
+async function orgPause(tid) {
+    await fetch(`/api/admin/tournaments/${tid}/pause`, {method:'POST'});
+    showToast('Tournoi en pause', 'info'); orgLoadTournamentsList(); loadTournaments();
+}
+async function orgResume(tid) {
+    await fetch(`/api/admin/tournaments/${tid}/resume`, {method:'POST'});
+    showToast('Tournoi repris', 'success'); orgLoadTournamentsList(); loadTournaments();
+}
+async function orgDelete(tid) {
+    if (!confirm('Supprimer ce tournoi ?')) return;
+    await fetch(`/api/admin/tournaments/${tid}`, {method:'DELETE'});
+    showToast('Supprimé', 'info'); orgLoadTournamentsList(); loadTournaments();
+}
+async function orgForceStart(tid) {
+    if (!confirm('Démarrer maintenant ?')) return;
+    const now = new Date().toISOString();
+    await fetch(`/api/admin/tournaments/${tid}`, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({registration_end: now, start_time: now}),
+    });
+    showToast('Démarrage forcé', 'success'); orgLoadTournamentsList(); loadTournaments();
+}
+async function orgReconnectAll(tid) {
+    const resp = await fetch(`/api/admin/tournaments/${tid}/reconnect-all`, {method:'POST'});
+    if (resp.ok) { const d = await resp.json(); showToast(`${d.results?.filter(r=>r.success).length||0} reconnecté(s)`, 'success'); }
+}
+async function orgRestartTables(tid) {
+    await fetch(`/api/admin/tournaments/${tid}/restart-tables`, {method:'POST'});
+    showToast('Tables relancées', 'success');
+}
+async function orgShowPlayers(tid) {
+    try {
+        const resp = await fetch(`/api/tournaments/${tid}`);
+        if (!resp.ok) return;
+        const t = await resp.json();
+        const players = t.ranking || [];
+        const modal = document.createElement('div');
+        modal.className = 'modal'; modal.style.display = 'flex';
+        modal.innerHTML = `<div class="modal-content" style="max-width:550px;max-height:70vh;overflow-y:auto">
+            <span class="close">&times;</span>
+            <h2>👥 ${escapeHtml(t.name)} (${players.length})</h2>
+            ${players.length ? `<table class="data-table" style="font-size:12px">
+                <thead><tr><th>#</th><th>Pseudo</th><th>Chips</th><th>Status</th><th>Act.</th></tr></thead>
+                <tbody>${players.map((p,i) => `<tr>
+                    <td>${i+1}</td><td>${escapeHtml(p.username)}</td>
+                    <td style="font-family:monospace;color:var(--success)">${(p.chips||0).toLocaleString()}</td>
+                    <td>${p.status}${p.muted?' 🔇':''}</td>
+                    <td>${p.muted
+                        ? `<button class="btn-small" onclick="orgToggleMute('${tid}','${p.user_id}',false,this)">🔊</button>`
+                        : `<button class="btn-small" onclick="orgToggleMute('${tid}','${p.user_id}',true,this)">🔇</button>`
+                    }${p.status!=='eliminated'?` <button class="btn-small btn-danger" onclick="orgExclude('${tid}','${p.user_id}')">❌</button>`:''}</td>
+                </tr>`).join('')}</tbody></table>` : '<p style="color:var(--text-muted)">Aucun joueur</p>'}
+        </div>`;
+        document.body.appendChild(modal);
+        modal.querySelector('.close').addEventListener('click', () => modal.remove());
+        modal.addEventListener('click', e => { if(e.target===modal) modal.remove(); });
+    } catch(e) { showToast('Erreur', 'error'); }
+}
+async function orgToggleMute(tid, uid, mute, btn) {
+    const endpoint = mute ? 'mute' : 'unmute';
+    await fetch(`/api/admin/tournaments/${tid}/${endpoint}`, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({user_id:uid}),
+    });
+    showToast(mute ? 'Muté' : 'Démuté', 'info');
+    if(btn) { btn.textContent = mute ? '🔊' : '🔇'; btn.onclick = () => orgToggleMute(tid,uid,!mute,btn); }
+}
+async function orgExclude(tid, uid) {
+    if (!confirm('Exclure ce joueur ?')) return;
+    await fetch(`/api/admin/tournaments/${tid}/exclude`, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({user_id:uid}),
+    });
+    showToast('Joueur exclu', 'info'); orgShowPlayers(tid);
+}
+ 
+// ══════════════════════════════════════════════════════════════════════════════
+// FIX joinMyTable — amélioration de la robustesse après crash
+// ══════════════════════════════════════════════════════════════════════════════
+// REMPLACER la fonction joinMyTable existante par celle-ci :
+ 
+async function joinMyTable(tid) {
+    if (!currentUser) { showToast('Connectez-vous d\'abord', 'error'); return; }
+ 
+    showToast('Recherche de votre table…', 'info');
+ 
+    try {
+        // 1) Essayer /my-table (route directe)
+        const resp = await fetch(`/api/tournaments/${tid}/my-table?user_id=${currentUser.id}`);
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.table_id) {
+                window.location.href = `/table/${data.table_id}`;
+                return;
+            }
+        }
+ 
+        // 2) Fallback /rejoin (recrée la table si besoin)
+        const rejoinResp = await fetch(`/api/tournaments/${tid}/rejoin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: currentUser.id }),
+        });
+ 
+        if (rejoinResp.ok) {
+            const data = await rejoinResp.json();
+            if (data.table_id) {
+                showToast('Table trouvée !', 'success');
+                window.location.href = `/table/${data.table_id}`;
+                return;
+            }
+            if (data.status === 'registration') {
+                showToast('Tournoi en inscription, patientez…', 'info');
+                return;
+            }
+        }
+ 
+        // 3) Dernier recours : vérifier le statut de reconnexion
+        const statusResp = await fetch(`/api/tournaments/${tid}/reconnect-status?user_id=${currentUser.id}`);
+        if (statusResp.ok) {
+            const status = await statusResp.json();
+            if (!status.can_reconnect) {
+                showToast(status.reason === 'eliminated' ? 'Vous avez été éliminé' : 'Impossible de rejoindre', 'error');
+                return;
+            }
+            if (status.table_id && status.table_exists) {
+                window.location.href = `/table/${status.table_id}`;
+                return;
+            }
+        }
+ 
+        showToast('Table introuvable, réessayez dans quelques secondes', 'warning');
+    } catch (e) {
+        console.error('joinMyTable:', e);
+        showToast('Erreur réseau', 'error');
+    }
+}
 // Start
 document.addEventListener('DOMContentLoaded', init);
+window.orgBlinds = orgBlinds;
+window.orgRenderBlinds = orgRenderBlinds;
+window.orgPause = orgPause;
+window.orgResume = orgResume;
+window.orgDelete = orgDelete;
+window.orgForceStart = orgForceStart;
+window.orgReconnectAll = orgReconnectAll;
+window.orgRestartTables = orgRestartTables;
+window.orgShowPlayers = orgShowPlayers;
+window.orgToggleMute = orgToggleMute;
+window.orgExclude = orgExclude;
+

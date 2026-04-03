@@ -16,6 +16,7 @@
                 <span id="userDisplay" class="user-info"></span>
                 <span id="localTime" class="local-time"></span>
                 <button id="optionsBtn" class="btn-small">⚙️ Options</button>
+                <button id="organizeBtn" class="btn-accent" style="display:none">🎯 Organiser</button>
                 <button id="loginBtn" class="btn-secondary">Connexion</button>
                 <button id="registerBtn" class="btn-secondary">Inscription</button>
                 <button id="logoutBtn" class="btn-small" style="display:none">Déconnexion</button>
@@ -68,6 +69,7 @@
                     <button class="options-tab" data-tab="chat">💬 Chat</button>
                     <button class="options-tab" data-tab="network">🌐 Réseau</button>
                     <button class="options-tab" data-tab="history">📜 Historique</button>
+                    <button class="options-tab" id="tournoiTabBtn" data-tab="tournoi" style="display:none">🏆 Tournois</button>
                     <button class="options-tab" id="adminTabBtn" data-tab="admin" style="display:none">🔧 Admin</button>
                 </div>
 
@@ -153,7 +155,61 @@
                     <div class="form-group"><button id="clearHistoryBtn" class="btn-small">Effacer l'historique local</button></div>
                     <div class="form-group"><label class="toggle-label"><input type="checkbox" id="autoSaveHistory"> Sauvegarde automatique après chaque main</label></div>
                 </div>
-
+<!-- Onglet Tournois (admin only) -->
+                <div id="tournoiTab" class="options-tab-content">
+                    <!-- Création rapide -->
+                    <h3 style="color:var(--accent);margin-bottom:12px">➕ Créer un tournoi</h3>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                        <div class="form-group"><label>Nom :</label><input type="text" id="orgName" placeholder="Ex: Freeroll du samedi"></div>
+                        <div class="form-group"><label>Variante :</label><select id="orgVariant"><option value="holdem">Hold'em</option><option value="plo">PLO</option></select></div>
+                        <div class="form-group"><label>Max joueurs :</label><input type="number" id="orgMax" value="100" min="2"></div>
+                        <div class="form-group"><label>Min démarrage :</label><input type="number" id="orgMin" value="3" min="2"></div>
+                        <div class="form-group"><label>Prize pool :</label><input type="number" id="orgPrize" value="0" min="0"></div>
+                        <div class="form-group"><label>ITM % :</label><input type="number" id="orgItm" value="10" min="1" max="100"></div>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:8px">
+                        <div class="form-group"><label>Début inscriptions :</label><input type="datetime-local" id="orgRegStart"></div>
+                        <div class="form-group"><label>Fin inscriptions :</label><input type="datetime-local" id="orgRegEnd"></div>
+                        <div class="form-group"><label>Début tournoi :</label><input type="datetime-local" id="orgStart"></div>
+                    </div>
+                    <div style="display:flex;gap:6px;align-items:center;margin:8px 0">
+                        <span style="font-size:12px;color:var(--text-muted)">Raccourcis :</span>
+                        <button type="button" class="btn-small" id="orgQuick5">Dans 5 min</button>
+                        <button type="button" class="btn-small" id="orgQuick15">Dans 15 min</button>
+                        <button type="button" class="btn-small" id="orgQuick60">Dans 1h</button>
+                    </div>
+ 
+                    <!-- Structure de blinds -->
+                    <details style="margin-top:12px">
+                        <summary style="cursor:pointer;color:var(--accent);font-size:13px;font-weight:600">🎰 Structure de blinds (cliquer pour modifier)</summary>
+                        <div style="display:flex;gap:4px;margin:8px 0">
+                            <button type="button" class="btn-small org-blind-preset active" data-preset="turbo">⚡ Turbo</button>
+                            <button type="button" class="btn-small org-blind-preset" data-preset="standard">🕐 Standard</button>
+                            <button type="button" class="btn-small org-blind-preset" data-preset="deep">🐢 Deep</button>
+                        </div>
+                        <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border-subtle);border-radius:6px;padding:4px">
+                            <table style="width:100%;border-collapse:collapse;font-size:12px" id="orgBlindsTable">
+                                <thead><tr style="position:sticky;top:0;background:var(--bg-secondary)">
+                                    <th style="padding:3px 4px">Niv.</th><th>SB</th><th>BB</th><th>Ante</th><th>Min</th><th></th>
+                                </tr></thead>
+                                <tbody id="orgBlindsBody"></tbody>
+                            </table>
+                        </div>
+                        <button type="button" class="btn-small" id="orgAddLevel" style="margin-top:4px">+ Niveau</button>
+                    </details>
+ 
+                    <div style="margin-top:12px;text-align:center">
+                        <button type="button" class="btn-primary" id="orgCreateBtn">🚀 Créer le tournoi</button>
+                    </div>
+ 
+                    <hr style="margin:20px 0;border-color:var(--border-subtle)">
+ 
+                    <!-- Liste des tournois existants -->
+                    <h3 style="color:var(--accent);margin-bottom:12px">📋 Tournois existants</h3>
+                    <div id="orgTournamentsList" style="max-height:300px;overflow-y:auto">
+                        <div class="loading">Chargement…</div>
+                    </div>
+                </div>
                 <!-- Onglet Admin -->
                 <div id="adminTab" class="options-tab-content">
                     <div class="form-group"><label>Thème admin :</label><select id="adminThemeSelect"><option value="dark">Sombre</option><option value="light">Clair</option><option value="neon">Néon</option><option value="blue">Bleu</option><option value="red">Rouge</option></select></div>
@@ -210,5 +266,123 @@
     <script src="/js/timer.js"></script>
     <script src="/js/hand_history.js"></script>
     <script src="/js/lobby.js"></script>
+    <script src="/js/organiser.js"></script>
+<div id="organizeModal" class="modal" style="display:none">
+    <div class="modal-content organize-modal">
+        <span class="close">&times;</span>
+        <h2>🎯 Organiser un tournoi</h2>
+ 
+        <div class="organize-tabs">
+            <button class="organize-tab active" data-otab="create">Créer</button>
+            <button class="organize-tab" data-otab="myTournaments">Mes tournois</button>
+        </div>
+ 
+        <!-- Onglet Créer -->
+        <div id="organizeCreateTab" class="organize-tab-content active">
+            <div class="organize-form">
+                <div class="form-row">
+                    <div class="form-group full">
+                        <label>Nom du tournoi *</label>
+                        <input type="text" id="orgName" placeholder="Ex: Freeroll du Mercredi" maxlength="80" required>
+                    </div>
+                </div>
+ 
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Description</label>
+                        <textarea id="orgDesc" rows="2" placeholder="Description optionnelle…" maxlength="300"></textarea>
+                    </div>
+                </div>
+ 
+                <div class="form-row two-cols">
+                    <div class="form-group">
+                        <label>Variante</label>
+                        <select id="orgVariant">
+                            <option value="holdem" selected>No-Limit Hold'em</option>
+                            <option value="plo">Pot-Limit Omaha</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Rythme des blinds</label>
+                        <select id="orgBlindPreset">
+                            <option value="standard" selected>Standard (~2h)</option>
+                            <option value="turbo">Turbo (~1h)</option>
+                            <option value="deepstack">Deepstack (~3h)</option>
+                        </select>
+                    </div>
+                </div>
+ 
+                <div class="form-row three-cols">
+                    <div class="form-group">
+                        <label>Max joueurs</label>
+                        <input type="number" id="orgMaxPlayers" value="50" min="2" max="100">
+                    </div>
+                    <div class="form-group">
+                        <label>Min pour démarrer</label>
+                        <input type="number" id="orgMinPlayers" value="3" min="2" max="20">
+                    </div>
+                    <div class="form-group">
+                        <label>Chips départ</label>
+                        <select id="orgChips">
+                            <option value="5000">5 000</option>
+                            <option value="10000" selected>10 000</option>
+                            <option value="20000">20 000</option>
+                            <option value="50000">50 000</option>
+                        </select>
+                    </div>
+                </div>
+ 
+                <div class="form-row two-cols">
+                    <div class="form-group">
+                        <label>Durée inscriptions</label>
+                        <select id="orgRegDuration">
+                            <option value="10">10 min</option>
+                            <option value="15">15 min</option>
+                            <option value="30" selected>30 min</option>
+                            <option value="60">1 heure</option>
+                            <option value="120">2 heures</option>
+                            <option value="1440">24 heures</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Démarrage dans</label>
+                        <select id="orgStartDelay">
+                            <option value="15">15 min</option>
+                            <option value="30">30 min</option>
+                            <option value="45" selected>45 min</option>
+                            <option value="60">1 heure</option>
+                            <option value="120">2 heures</option>
+                            <option value="1440">24 heures</option>
+                        </select>
+                    </div>
+                </div>
+ 
+                <!-- Résumé live -->
+                <div class="organize-summary" id="orgSummary">
+                    <div class="summary-title">📋 Résumé</div>
+                    <div class="summary-grid">
+                        <span class="slabel">Inscriptions ferment</span>
+                        <span class="svalue" id="orgSumRegEnd">—</span>
+                        <span class="slabel">Début du tournoi</span>
+                        <span class="svalue" id="orgSumStart">—</span>
+                        <span class="slabel">Structure</span>
+                        <span class="svalue" id="orgSumStructure">—</span>
+                    </div>
+                </div>
+ 
+                <div class="organize-actions">
+                    <button id="orgCreateBtn" class="btn-primary btn-lg">Créer le tournoi</button>
+                </div>
+            </div>
+        </div>
+ 
+        <!-- Onglet Mes tournois -->
+        <div id="organizeMyTournamentsTab" class="organize-tab-content">
+            <div id="myTournamentsList" class="my-tournaments-list">
+                <div class="loading">Chargement…</div>
+            </div>
+        </div>
+    </div>
+</div>
 </body>
 </html>

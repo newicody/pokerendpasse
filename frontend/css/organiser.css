@@ -1,0 +1,215 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   ORGANISER — Styles modale et formulaire
+   Ajouter à la fin de frontend/css/lobby.css
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Bouton accent dans le header */
+.btn-accent {
+    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 70%, #fff));
+    color: #000;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+.btn-accent:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(var(--accent-rgb, 255,215,0), 0.3);
+}
+.btn-lg { padding: 10px 24px; font-size: 15px; }
+
+/* Modale organisateur */
+.organize-modal {
+    max-width: 640px;
+    max-height: 85vh;
+    overflow-y: auto;
+}
+
+/* Onglets organisateur */
+.organize-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid var(--border-subtle);
+}
+.organize-tab {
+    padding: 8px 20px;
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.2s, border-color 0.2s;
+}
+.organize-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+.organize-tab:hover:not(.active) {
+    color: var(--text-primary);
+}
+.organize-tab-content {
+    display: none;
+}
+.organize-tab-content.active {
+    display: block;
+}
+
+/* Formulaire de création */
+.organize-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.form-row {
+    display: flex;
+    gap: 12px;
+}
+.form-row.two-cols > .form-group { flex: 1; }
+.form-row.three-cols > .form-group { flex: 1; }
+.form-row > .form-group.full { flex: 1; }
+
+.organize-form .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.organize-form label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.organize-form input,
+.organize-form select,
+.organize-form textarea {
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 14px;
+    transition: border-color 0.2s;
+}
+.organize-form input:focus,
+.organize-form select:focus,
+.organize-form textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+.organize-form textarea {
+    resize: vertical;
+}
+
+/* Résumé */
+.organize-summary {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-top: 4px;
+}
+.summary-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 8px;
+}
+.summary-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 16px;
+    font-size: 13px;
+}
+.slabel { color: var(--text-muted); }
+.svalue { color: var(--text-primary); font-family: 'Fira Mono', monospace; font-weight: 500; }
+
+/* Bouton créer */
+.organize-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 8px;
+}
+
+/* ── Mes tournois ────────────────────────────────────────────────────────── */
+.my-tournaments-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.my-tournament-card {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    padding: 14px 16px;
+    transition: border-color 0.2s;
+}
+.my-tournament-card:hover {
+    border-color: var(--accent);
+}
+.my-tournament-card .mt-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+.my-tournament-card .mt-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.my-tournament-card .mt-meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
+.my-tournament-card .mt-meta span {
+    display: flex;
+    gap: 4px;
+}
+.my-tournament-card .mt-meta .mv {
+    color: var(--text-primary);
+    font-family: 'Fira Mono', monospace;
+}
+.my-tournament-card .mt-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.mt-actions .btn-sm {
+    padding: 4px 10px;
+    font-size: 11px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: 500;
+}
+.mt-actions .btn-edit { background: var(--info); color: #fff; }
+.mt-actions .btn-pause { background: var(--warning); color: #1a1a1a; }
+.mt-actions .btn-resume { background: var(--success); color: #fff; }
+.mt-actions .btn-cancel { background: var(--danger); color: #fff; }
+.mt-actions .btn-view { background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
+
+/* Status badges supplémentaires */
+.status-cancelled { background: rgba(231,76,60,0.2); color: var(--danger); }
+
+/* Responsive */
+@media (max-width: 600px) {
+    .organize-modal { max-width: 95vw; }
+    .form-row.two-cols, .form-row.three-cols { flex-direction: column; }
+    .summary-grid { grid-template-columns: 1fr; }
+}

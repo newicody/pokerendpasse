@@ -26,11 +26,6 @@
         .action-btn-sm.warn { background: var(--warning); color: #1a1a1a; }
         .action-btn-sm.success { background: var(--success); color: #fff; }
         .create-form { max-width: 500px; }
-        .status-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; text-transform: uppercase; }
-        .status-registration { background: rgba(52,152,219,0.2); color: var(--info); }
-        .status-in_progress { background: rgba(39,174,96,0.2); color: var(--success); }
-        .status-paused { background: rgba(255,152,0,0.2); color: var(--warning); }
-        .status-finished { background: rgba(155,155,155,0.2); color: var(--text-muted); }
     </style>
 </head>
 <body>
@@ -39,8 +34,6 @@
             <div class="logo">🔧 Admin — PokerEndPasse</div>
             <nav class="header-nav">
                 <a href="/lobby" class="btn-small">← Lobby</a>
-                <span id="localTime" class="local-time"></span>
-                <button id="themePicker" class="btn-small">🎨 Thème</button>
             </nav>
         </header>
 
@@ -70,11 +63,12 @@
                 <div class="form-group"><label>Variante :</label><select id="tVariant"><option value="holdem">Hold'em</option><option value="plo">PLO</option></select></div>
                 <div class="form-group"><label>Max joueurs :</label><input type="number" id="tMax" value="100"></div>
                 <div class="form-group"><label>Min pour démarrer :</label><input type="number" id="tMin" value="4"></div>
-                <div class="form-group"><label>Dotation (prize pool) :</label><input type="number" id="tPrize" value="0"></div>
+                <div class="form-group"><label>Chips de départ :</label><input type="number" id="tChips" value="10000" min="100" step="500"></div>
+                <div class="form-group"><label>Dotation :</label><input type="number" id="tPrize" value="0"></div>
                 <div class="form-group"><label>ITM % :</label><input type="number" id="tItm" value="10" step="1"></div>
-                <div class="form-group"><label>Début inscriptions :</label><input type="datetime-local" id="tRegStart" required></div>
-                <div class="form-group"><label>Fin inscriptions :</label><input type="datetime-local" id="tRegEnd" required></div>
-                <div class="form-group"><label>Début tournoi :</label><input type="datetime-local" id="tStart" required></div>
+                <div class="form-group"><label>Début inscriptions :</label><input type="datetime-local" id="tRegStart"></div>
+                <div class="form-group"><label>Fin inscriptions :</label><input type="datetime-local" id="tRegEnd"></div>
+                <div class="form-group"><label>Début tournoi :</label><input type="datetime-local" id="tStart"></div>
                 <button class="btn-primary" onclick="createTournament()">Créer</button>
             </div>
 
@@ -102,37 +96,8 @@
             </div>
         </div>
 
-        <div id="toastContainer" class="toast-container"></div>
     </div>
 
-    <!-- Scripts -->
-    <script src="/js/settings_manager.js"></script>
-    <script src="/js/theme_manager.js"></script>
-    <script src="/js/sound_manager.js"></script>
     <script src="/js/admin.js"></script>
-    <script>
-        // Initialisation simple pour l'heure locale et le thème rapide
-        function updateLocalTime() {
-            const el = document.getElementById('localTime');
-            if (el) el.textContent = new Date().toLocaleTimeString();
-        }
-        setInterval(updateLocalTime, 1000);
-        updateLocalTime();
-
-        // Sélecteur de thème rapide
-        const themePicker = document.getElementById('themePicker');
-        if (themePicker && typeof ThemeManager !== 'undefined') {
-            themePicker.addEventListener('click', () => {
-                const themes = ThemeManager.getAvailable();
-                const current = ThemeManager.getTheme();
-                const nextIndex = (themes.indexOf(current) + 1) % themes.length;
-                const nextTheme = themes[nextIndex];
-                ThemeManager.setTheme(nextTheme);
-                if (typeof SettingsManager !== 'undefined') {
-                    SettingsManager.set('theme', nextTheme);
-                }
-            });
-        }
-    </script>
 </body>
-</html>
+</html>	

@@ -42,6 +42,54 @@ DEFAULT_BLIND_STRUCTURE = [
     {'level': 12, 'small_blind': 1000,'big_blind': 2000,  'ante': 200, 'duration': 20},
 ]
 
+from .models import OrganizeTournamentRequest
+#
+# AJOUTER les blind presets (constante en haut du fichier ou dans tournament.py):
+ 
+BLIND_PRESETS = {
+    "standard": [
+        {'level': 1,  'small_blind': 10,   'big_blind': 20,    'ante': 0,   'duration': 12},
+        {'level': 2,  'small_blind': 15,   'big_blind': 30,    'ante': 0,   'duration': 12},
+        {'level': 3,  'small_blind': 25,   'big_blind': 50,    'ante': 0,   'duration': 12},
+        {'level': 4,  'small_blind': 50,   'big_blind': 100,   'ante': 10,  'duration': 12},
+        {'level': 5,  'small_blind': 75,   'big_blind': 150,   'ante': 15,  'duration': 12},
+        {'level': 6,  'small_blind': 100,  'big_blind': 200,   'ante': 25,  'duration': 15},
+        {'level': 7,  'small_blind': 150,  'big_blind': 300,   'ante': 25,  'duration': 15},
+        {'level': 8,  'small_blind': 200,  'big_blind': 400,   'ante': 50,  'duration': 15},
+        {'level': 9,  'small_blind': 300,  'big_blind': 600,   'ante': 75,  'duration': 15},
+        {'level': 10, 'small_blind': 500,  'big_blind': 1000,  'ante': 100, 'duration': 20},
+        {'level': 11, 'small_blind': 750,  'big_blind': 1500,  'ante': 150, 'duration': 20},
+        {'level': 12, 'small_blind': 1000, 'big_blind': 2000,  'ante': 200, 'duration': 20},
+    ],
+    "turbo": [
+        {'level': 1,  'small_blind': 15,   'big_blind': 30,    'ante': 0,   'duration': 5},
+        {'level': 2,  'small_blind': 25,   'big_blind': 50,    'ante': 0,   'duration': 5},
+        {'level': 3,  'small_blind': 50,   'big_blind': 100,   'ante': 10,  'duration': 5},
+        {'level': 4,  'small_blind': 100,  'big_blind': 200,   'ante': 25,  'duration': 5},
+        {'level': 5,  'small_blind': 150,  'big_blind': 300,   'ante': 25,  'duration': 6},
+        {'level': 6,  'small_blind': 200,  'big_blind': 400,   'ante': 50,  'duration': 6},
+        {'level': 7,  'small_blind': 300,  'big_blind': 600,   'ante': 75,  'duration': 6},
+        {'level': 8,  'small_blind': 500,  'big_blind': 1000,  'ante': 100, 'duration': 8},
+        {'level': 9,  'small_blind': 750,  'big_blind': 1500,  'ante': 150, 'duration': 8},
+        {'level': 10, 'small_blind': 1000, 'big_blind': 2000,  'ante': 200, 'duration': 10},
+    ],
+    "deepstack": [
+        {'level': 1,  'small_blind': 5,    'big_blind': 10,    'ante': 0,   'duration': 15},
+        {'level': 2,  'small_blind': 10,   'big_blind': 20,    'ante': 0,   'duration': 15},
+        {'level': 3,  'small_blind': 15,   'big_blind': 30,    'ante': 0,   'duration': 15},
+        {'level': 4,  'small_blind': 25,   'big_blind': 50,    'ante': 5,   'duration': 15},
+        {'level': 5,  'small_blind': 50,   'big_blind': 100,   'ante': 10,  'duration': 15},
+        {'level': 6,  'small_blind': 75,   'big_blind': 150,   'ante': 15,  'duration': 20},
+        {'level': 7,  'small_blind': 100,  'big_blind': 200,   'ante': 25,  'duration': 20},
+        {'level': 8,  'small_blind': 150,  'big_blind': 300,   'ante': 25,  'duration': 20},
+        {'level': 9,  'small_blind': 200,  'big_blind': 400,   'ante': 50,  'duration': 20},
+        {'level': 10, 'small_blind': 300,  'big_blind': 600,   'ante': 75,  'duration': 25},
+        {'level': 11, 'small_blind': 500,  'big_blind': 1000,  'ante': 100, 'duration': 25},
+        {'level': 12, 'small_blind': 750,  'big_blind': 1500,  'ante': 150, 'duration': 25},
+    ],
+}
+
+
 PRESTART_ABSENT_TIMEOUT = 30  # secondes avant de marquer absents au départ
 
 
@@ -67,7 +115,9 @@ class Tournament:
         blind_structure: Optional[List[Dict]] = None,
         description: str = "",
         game_variant: str = "holdem",
+        organizer_id: str = "",        # <── NOUVEAU
     ):
+        self.organizer_id = organizer_id  # <── NOUVEAU
         self.id = tournament_id
         self.name = name
         self.description = description
@@ -256,6 +306,7 @@ class Tournament:
         _add('itm_percentage', self.itm_percentage)
         _add('starting_chips', self.starting_chips)
         _add('game_variant', self.game_variant)
+        _add('organizer_id', self.organizer_id)
         _add('status', self.status if isinstance(self.status, str) else self.status.value)
         _add('current_level', self.current_level)
         _add('level_started_at', self.level_started_at.isoformat() if self.level_started_at else '')
@@ -353,6 +404,7 @@ class Tournament:
             blind_structure=blind_structure or None,
             description=_txt('description'),
             game_variant=_txt('game_variant', 'holdem'),
+            organizer_id = _txt('organizer_id', ''),
         )
 
         t.status = _txt('status', TournamentStatus.REGISTRATION)
